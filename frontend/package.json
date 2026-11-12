@@ -1,0 +1,43 @@
+{
+  "name": "cardflow-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pro Panel — Enterprise Digital ID Card Management Platform",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "format": "prettier --write \"src/**/*.{js,jsx,css,json}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,css,json}\"",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "^9.1.2",
+    "@tanstack/react-virtual": "^3.14.9",
+    "axios": "^1.18.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "framer-motion": "^13.1.0",
+    "lenis": "^1.3.26",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-loading-skeleton": "^3.5.0",
+    "recharts": "^3.10.1",
+    "sonner": "^2.0.8",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.71.0",
+    "prettier": "^3.9.6",
+    "vite": "^8.1.1"
+  }
+}

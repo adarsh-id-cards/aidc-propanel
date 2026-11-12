@@ -1,0 +1,29 @@
+# Environments & Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies & Build Outputs
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+test_db.sqlite3
+
+# Logs & Caches
+*.log
+logs/
+.pytest_cache/
+.benchmarks/
+
+# Media Uploads & Collected Staticfiles
+media/
+staticfiles/
+cache/

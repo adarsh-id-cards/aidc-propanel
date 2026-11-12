@@ -1,0 +1,572 @@
+/* ============================================================
+   CardFlow — Cosmic Eclipse Glassmorphism Authentication UI
+   Matches dark cosmic space aesthetic with neon violet corona glow
+   ============================================================ */
+
+/* ── Fullscreen Cosmic Viewport ── */
+.auth-cosmic-viewport {
+  position: relative;
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #030206;
+  color: #ffffff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* ── High-Res Cosmic Space Background ── */
+.auth-cosmic-bg {
+  position: absolute;
+  inset: 0;
+  background: url('/cosmic_auth_bg.jpg') no-repeat right 12% center / cover;
+  background-attachment: fixed;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── Atmospheric Ambient Corona & Lens Flares ── */
+.auth-cosmic-flare {
+  position: absolute;
+  top: -5%;
+  right: 12%;
+  width: clamp(350px, 45vw, 700px);
+  height: clamp(350px, 45vw, 700px);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.22) 0%, rgba(217, 70, 239, 0.12) 40%, transparent 70%);
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.auth-cosmic-dust {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(1px 1px at 20% 30%, rgba(255, 255, 255, 0.6) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 75% 85%, rgba(216, 180, 254, 0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 45% 70%, rgba(255, 255, 255, 0.4) 0%, transparent 100%),
+    radial-gradient(2px 2px at 15% 75%, rgba(192, 132, 252, 0.5) 0%, transparent 100%);
+  background-repeat: repeat;
+  background-size: 500px 500px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Centered Floating Stage ── */
+.auth-cosmic-stage {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 440px;
+  padding: 24px 20px;
+  box-sizing: border-box;
+}
+
+/* ── The Cosmic Glassmorphic Card ── */
+.auth-cosmic-card {
+  position: relative;
+  width: 100%;
+  background: rgba(13, 11, 25, 0.82);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  border: 1px solid rgba(168, 85, 247, 0.22);
+  border-radius: 22px;
+  padding: 38px 32px 34px 32px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Top-Right Neon Purple Glow Sweep (matches celestial eclipse) */
+.auth-card-corner-glow {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 160px;
+  height: 160px;
+  border-top-right-radius: 22px;
+  background: radial-gradient(circle at 100% 0%, rgba(168, 85, 247, 0.12) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Inner Form Container */
+.auth-card-content {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Typography & Headers (Centered & Polished) ── */
+.auth-form-header {
+  margin-bottom: 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.auth-brand-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.auth-brand-logo {
+  max-height: 38px;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 14px rgba(168, 85, 247, 0.45)) brightness(1.1);
+}
+
+.auth-title {
+  font-size: 27px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.auth-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: center;
+  max-width: 340px;
+}
+
+/* ── Form Layout ── */
+.auth-cosmic-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* ── Input Groups ── */
+.auth-input-group {
+  position: relative;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.auth-cosmic-input {
+  width: 100%;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 14.5px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-cosmic-input::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+  font-weight: 400;
+}
+
+.auth-cosmic-input:focus {
+  border-color: rgba(168, 85, 247, 0.75);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.24);
+}
+
+/* Input with leading icon */
+.auth-input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-lead-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(255, 255, 255, 0.42);
+  pointer-events: none;
+  transition: color 0.2s ease;
+  z-index: 2;
+}
+
+.auth-input-with-icon .auth-cosmic-input {
+  padding-left: 42px;
+}
+
+.auth-input-with-icon:focus-within .auth-input-lead-icon {
+  color: #c084fc;
+}
+
+/* Password Toggle Eye Button */
+.auth-password-group {
+  position: relative;
+}
+
+.auth-password-group .auth-cosmic-input {
+  padding-right: 46px;
+}
+
+.auth-show-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.45) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer;
+  border-radius: 6px;
+  line-height: 1 !important;
+  outline: none;
+  z-index: 3;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.auth-show-btn:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.auth-show-btn svg {
+  width: 18px !important;
+  height: 18px !important;
+  display: block !important;
+  margin: auto !important;
+  padding: 0 !important;
+  flex-shrink: 0;
+}
+
+/* ── Forgot Password Row ── */
+.auth-forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 18px 0;
+}
+
+.auth-forgot-link {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  text-align: left;
+}
+
+.auth-forgot-link:hover {
+  color: #c084fc;
+}
+
+/* ── Primary Glowing Violet Button ── */
+.auth-cosmic-submit-btn {
+  width: 100%;
+  height: 46px;
+  background: #7c3aed;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.auth-cosmic-submit-btn:hover:not(:disabled) {
+  background: #6d28d9;
+  border-color: #a78bfa;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  transform: none;
+}
+
+.auth-cosmic-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.auth-cosmic-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.auth-btn-spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── "or" Divider ── */
+.auth-cosmic-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0;
+  width: 100%;
+}
+
+.auth-cosmic-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.auth-cosmic-divider span {
+  position: relative;
+  background: #0d0a1b;
+  padding: 0 14px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 13px;
+  text-transform: lowercase;
+  font-weight: 400;
+}
+
+/* ── Secondary Action: PIN Login / Password Login Button ── */
+.auth-pin-action-btn {
+  width: 100%;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.auth-pin-action-btn:hover {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: #c084fc;
+  color: #ffffff;
+  transform: none;
+}
+
+.auth-pin-action-btn:active {
+  transform: translateY(0);
+}
+
+/* ── Create PIN Notification Banner ── */
+.auth-create-pin-banner {
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 9px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #f3e8ff;
+  font-size: 13px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.auth-create-pin-inline-btn {
+  background: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
+  border: none;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(124, 58, 237, 0.4);
+  transition: all 0.15s ease;
+}
+
+.auth-create-pin-inline-btn:hover {
+  filter: brightness(1.15);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Quick Demo Roles Selector ── */
+.auth-demo-switcher {
+  margin-top: 14px;
+  width: 100%;
+}
+
+.auth-demo-toggle-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed rgba(168, 85, 247, 0.35);
+  border-radius: 8px;
+  color: #c084fc;
+  font-size: 12.5px;
+  padding: 7px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.auth-demo-toggle-btn:hover {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: #c084fc;
+}
+
+.auth-demo-pills-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.auth-demo-pill {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: all 0.15s ease;
+}
+
+.auth-demo-pill:hover {
+  background: rgba(168, 85, 247, 0.25);
+  border-color: #c084fc;
+  transform: none;
+}
+
+.demo-pill-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e9d5ff;
+}
+
+.demo-pill-user {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: monospace;
+}
+
+/* ── Bottom Footer Text ── */
+.auth-cosmic-footer {
+  margin-top: 22px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 14.5px;
+}
+
+.auth-join-btn {
+  background: none;
+  border: none;
+  color: #818cf8;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: 14.5px;
+  transition: color 0.15s ease;
+}
+
+.auth-join-btn:hover {
+  color: #a5b4fc;
+  text-decoration: underline;
+}
+
+/* ── Error & Success Boxes ── */
+.auth-error-box {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  color: #fca5a5;
+  font-size: 13.5px;
+  line-height: 1.4;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-error-icon {
+  flex-shrink: 0;
+  color: #f87171;
+}
+
+.auth-success-box {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  color: #86efac;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+/* ── Mobile & Responsive Breakpoints ── */
+@media (max-width: 480px) {
+  .auth-cosmic-stage {
+    padding: 16px;
+  }
+
+  .auth-cosmic-card {
+    padding: 28px 20px 24px 20px;
+    border-radius: 16px;
+  }
+
+  .auth-title {
+    font-size: 27px;
+  }
+
+  .auth-card-corner-glow {
+    width: 140px;
+    height: 140px;
+  }
+}

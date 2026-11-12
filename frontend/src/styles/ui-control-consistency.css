@@ -1,0 +1,1382 @@
+/* Cross-page control/table consistency layer.
+   Keeps icon sizes, control typography, and table typography aligned. */
+:root {
+  --sidebar-width: 134px !important;
+  --spacing-sidebar: 134px !important;
+  --ui-font-family-sans: var(--font-sans, var(--font-family, "Saira Semi Condensed", "Segoe UI", "Helvetica Neue", Arial, sans-serif));
+}
+
+@media (min-width: 1000px) and (max-width: 1366px) {
+  :root {
+    --sidebar-width: 124px !important;
+    --spacing-sidebar: 124px !important;
+  }
+}
+
+:root {
+
+  /* Core UI type scale (small-to-large) — +1px globally. */
+  --ui-font-size-5xs: 8px;
+  --ui-font-size-4xs: 9px;
+  --ui-font-size-3xs: 10px;
+  --ui-font-size-3xs-plus: 10.5px;
+  --ui-font-size-2xs: 12px;
+  --ui-font-size-2xs-plus: 11px;
+  --ui-font-size-xs-tight: 12.8px;
+  --ui-font-size-xs: 13px;
+  --ui-font-size-sm-tight: 13.8px;
+  --ui-font-size-sm: 14px;
+  --ui-font-size-md-tight: 14.8px;
+  --ui-font-size-md: 15px;
+  --ui-font-size-base: 16px;
+  --ui-font-size-lg: 17px;
+  --ui-font-size-xl: 18px;
+  --ui-font-size-xl-plus: 19px;
+  --ui-font-size-2xl: 20px;
+  --ui-font-size-2xl-plus: 21px;
+  --ui-font-size-3xl: 22px;
+  --ui-font-size-3xl-plus: 23px;
+  --ui-font-size-3xl-lg: 24px;
+  --ui-font-size-4xl: 26px;
+  --ui-font-size-4xl-plus: 28px;
+  --ui-font-size-5xl: 30px;
+  --ui-font-size-6xl: 32px;
+  --ui-font-size-7xl: 34px;
+  --ui-font-size-8xl: 38px;
+  --ui-font-size-9xl: 42px;
+  --ui-font-size-10xl: 50px;
+
+  --ui-line-height-tight: 1.2;
+  --ui-line-height-body: 1.4;
+  --ui-line-height-relaxed: 1.5;
+
+  /* Hierarchy aliases. */
+  --ui-heading-h1-size: var(--ui-font-size-5xl);
+  --ui-heading-h2-size: var(--ui-font-size-4xl);
+  --ui-heading-h3-size: var(--ui-font-size-3xl);
+  --ui-heading-h4-size: var(--ui-font-size-2xl);
+  --ui-heading-h5-size: var(--ui-font-size-xl);
+  --ui-heading-h6-size: var(--ui-font-size-lg);
+
+  --ui-consistent-control-font-size: var(--ui-font-size-sm);
+  --ui-consistent-control-font-weight: 600;
+  --ui-consistent-input-font-weight: 500;
+  --ui-consistent-table-head-font-size: var(--ui-font-size-sm);
+  --ui-consistent-table-head-font-weight: 600;
+  --ui-consistent-table-body-font-size: var(--ui-font-size-sm);
+  --ui-consistent-table-body-font-weight: 500;
+  --ui-consistent-icon-size: var(--ui-font-size-sm);
+}
+
+html,
+body,
+input,
+button,
+select,
+textarea {
+  font-family: var(--ui-font-family-sans);
+}
+
+body {
+  font-size: var(--ui-font-size-lg);
+  line-height: var(--ui-line-height-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ui-font-family-sans);
+  line-height: var(--ui-line-height-tight);
+}
+
+h1 { font-size: var(--ui-heading-h1-size); }
+h2 { font-size: var(--ui-heading-h2-size); }
+h3 { font-size: var(--ui-heading-h3-size); }
+h4 { font-size: var(--ui-heading-h4-size); }
+h5 { font-size: var(--ui-heading-h5-size); }
+h6 { font-size: var(--ui-heading-h6-size); }
+
+/* Keep the app/sidebar brand title on one compact, uniform scale everywhere. */
+.sidebar .sidebar-header {
+  height: 50px !important;
+  min-height: 50px !important;
+  max-height: 50px !important;
+  padding: 0 6px !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-right: none !important;
+  overflow: hidden !important;
+}
+
+.sidebar .sidebar-header img,
+.sidebar .logo-flare-container img {
+  max-width: 100% !important;
+  max-height: 28px !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+}
+
+.sidebar .logo-flare-container {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 2px 4px !important;
+}
+
+.sidebar .sidebar-logo {
+  min-width: 0;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.sidebar .sidebar-logo .profile {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.sidebar .sidebar-logo .profile img {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.sidebar .sidebar-logo h3,
+.sidebar .sidebar-logo .sidebar-brand-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.15;
+  letter-spacing: -0.015em !important;
+  font-size: 14.5px !important;
+  font-weight: 700 !important;
+  color: #1e1e2e !important;
+}
+
+small,
+.text-xs,
+.caption,
+.helper-text {
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-relaxed);
+}
+
+label,
+.form-label,
+.field-label {
+  font-size: var(--ui-font-size-md);
+  line-height: var(--ui-line-height-tight);
+}
+
+/* ── Universal Standardized Control Heights & Sizing Continuity (32px Baseline matching tabbar) ── */
+.main .btn,
+.main .btn.btn-sm,
+.main .action-btn,
+.main .cf-btn,
+.action-bar .btn,
+.search-filter-bar .btn,
+.main .pagination-controls button,
+.main .page-num {
+  font-size: var(--ui-consistent-control-font-size) !important;
+  line-height: 1 !important;
+  font-weight: var(--ui-consistent-control-font-weight) !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 4px !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.main .btn.btn-md {
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 16px !important;
+}
+
+.main .btn.btn-lg {
+  height: 46px !important;
+  min-height: 46px !important;
+  max-height: 46px !important;
+  padding: 0 20px !important;
+}
+
+.main select.form-select,
+.main select.form-select-sm,
+.main select,
+.main .dropdown-toggle,
+.action-bar select,
+.search-filter-bar select,
+.main .custom-select-container button {
+  font-size: var(--ui-consistent-control-font-size) !important;
+  line-height: 32px !important;
+  font-weight: var(--ui-consistent-input-font-weight) !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 4px !important;
+  box-sizing: border-box !important;
+}
+
+.main .search-box,
+.main .notif-search-box,
+.main .ui-search-box,
+.action-bar .search-box,
+.action-bar .notif-search-box,
+.main .cf-input-wrapper {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  border-radius: 4px !important;
+  box-sizing: border-box !important;
+}
+
+.main .search-box .search-input,
+.main .notif-search-box input,
+.main .cf-input-wrapper input {
+  font-size: var(--ui-consistent-control-font-size) !important;
+  line-height: 1.2 !important;
+  font-weight: var(--ui-consistent-input-font-weight) !important;
+  height: 100% !important;
+}
+
+.main .btn i,
+.main .btn svg,
+.main .dropdown-toggle i,
+.main .dropdown-toggle svg,
+.main .search-box .search-icon,
+.main .search-box .search-clear-btn i,
+.main .search-box .search-clear-btn svg,
+.main .notif-search-box i {
+  width: var(--ui-consistent-icon-size);
+  height: var(--ui-consistent-icon-size);
+  font-size: var(--ui-consistent-icon-size) !important;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Standardized Table Row (Raws) Dimensions & Fixed Min Heights/Widths (th: 38px / 2px 3px, td: 44px-68px / 2px) ── */
+thead tr,
+table thead tr,
+.data-table thead tr,
+.wa-table thead tr,
+.notif-table thead tr,
+.reprint-history-table thead tr,
+.audit-users-table thead tr,
+.recent-table thead tr,
+.main .data-table thead tr,
+.main .wa-table thead tr,
+.main .notif-table thead tr,
+.main .reprint-history-table thead tr,
+.main .audit-users-table thead tr,
+.idcard-table thead tr {
+  height: 38px !important;
+  min-height: 38px !important;
+}
+
+th,
+table th,
+.data-table th,
+.wa-table thead th,
+.notif-table th,
+.reprint-history-table th,
+.audit-users-table th,
+.recent-table th,
+.main .data-table th,
+.main .wa-table thead th,
+.main .notif-table th,
+.main .reprint-history-table th,
+.main .audit-users-table th,
+.idcard-table th {
+  font-size: var(--ui-consistent-table-head-font-size) !important;
+  font-weight: var(--ui-consistent-table-head-font-weight) !important;
+  line-height: 1.25 !important;
+  padding: 6px 10px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  vertical-align: middle !important;
+  box-sizing: border-box !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-bottom: 2px solid #0f172a !important;
+  color: #f8fafc !important;
+  letter-spacing: 0.04em !important;
+}
+
+tbody tr:not(.virtual-spacer-row),
+table tbody tr:not(.virtual-spacer-row),
+.data-table tbody tr:not(.virtual-spacer-row),
+.wa-table tbody tr:not(.virtual-spacer-row),
+.notif-table tbody tr:not(.virtual-spacer-row),
+.reprint-history-table tbody tr:not(.virtual-spacer-row),
+.audit-users-table tbody tr:not(.virtual-spacer-row),
+.recent-table tbody tr:not(.virtual-spacer-row),
+.main .data-table tbody tr:not(.virtual-spacer-row),
+.main .wa-table tbody tr:not(.virtual-spacer-row),
+.main .notif-table tbody tr:not(.virtual-spacer-row),
+.main .reprint-history-table tbody tr:not(.virtual-spacer-row),
+.main .audit-users-table tbody tr:not(.virtual-spacer-row) {
+  height: 44px !important;
+  min-height: 44px !important;
+  transition: background-color 0.12s ease-in-out !important;
+}
+
+.main .data-table tbody tr:nth-child(even),
+.data-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
+.main .data-table tbody tr:nth-child(odd),
+.data-table tbody tr:nth-child(odd) {
+  background-color: #ffffff;
+}
+
+.main .data-table tbody tr:hover,
+.data-table tbody tr:hover,
+.main .wa-table tbody tr:hover,
+.main .notif-table tbody tr:hover,
+.main .reprint-history-table tbody tr:hover,
+.main .audit-users-table tbody tr:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.main .data-table tbody tr.selected,
+.data-table tbody tr.selected,
+.main .data-table tbody tr.is-selected,
+.data-table tbody tr.is-selected {
+  background-color: #eff6ff !important;
+}
+
+.main .data-table tbody tr.selected td:first-child,
+.data-table tbody tr.selected td:first-child,
+.main .data-table tbody tr.is-selected td:first-child,
+.data-table tbody tr.is-selected td:first-child {
+  border-left: 3px solid #2563eb !important;
+}
+
+td:not(.virtual-spacer-cell),
+table td:not(.virtual-spacer-cell),
+.data-table td:not(.virtual-spacer-cell),
+.wa-table tbody td:not(.virtual-spacer-cell),
+.notif-table td:not(.virtual-spacer-cell),
+.reprint-history-table td:not(.virtual-spacer-cell),
+.audit-users-table td:not(.virtual-spacer-cell),
+.recent-table td:not(.virtual-spacer-cell),
+.main .data-table td:not(.virtual-spacer-cell),
+.main .wa-table tbody td:not(.virtual-spacer-cell),
+.main .notif-table td:not(.virtual-spacer-cell),
+.main .reprint-history-table td:not(.virtual-spacer-cell),
+.main .audit-users-table td:not(.virtual-spacer-cell) {
+  font-size: var(--ui-consistent-table-body-font-size) !important;
+  font-weight: var(--ui-consistent-table-body-font-weight) !important;
+  line-height: 1.35 !important;
+  padding: 7px 10px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  vertical-align: middle !important;
+  box-sizing: border-box !important;
+  text-transform: uppercase !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  border-right: 1px solid #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+/* ID Card table rows & cells have fixed 68px min-height for photo thumbnails and rich content */
+.idcard-table tbody tr:not(.virtual-spacer-row) {
+  height: 68px !important;
+  min-height: 68px !important;
+}
+
+.idcard-table td:not(.virtual-spacer-cell),
+.idcard-table td.dynamic-field:not(.virtual-spacer-cell) {
+  height: 68px !important;
+  min-height: 68px !important;
+  padding: 8px 10px !important;
+  vertical-align: middle !important;
+  box-sizing: border-box !important;
+}
+
+/* TanStack Virtual spacer row & cell — must NEVER be clamped by row/cell height constraints */
+.virtual-spacer-row,
+tbody tr.virtual-spacer-row,
+table tbody tr.virtual-spacer-row,
+.idcard-table tbody tr.virtual-spacer-row {
+  height: var(--spacer-height, auto) !important;
+  min-height: var(--spacer-height, 0px) !important;
+  max-height: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+.virtual-spacer-cell,
+tbody td.virtual-spacer-cell,
+table td.virtual-spacer-cell,
+.idcard-table td.virtual-spacer-cell {
+  height: var(--spacer-height, auto) !important;
+  min-height: var(--spacer-height, 0px) !important;
+  max-height: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  line-height: 0 !important;
+  font-size: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Action cells & inline buttons inside table rows */
+.main .wa-actions .btn,
+.main .actions .btn,
+.main .staff-actions .btn,
+.main .data-table td .btn {
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.main .wa-actions .btn:hover,
+.main .actions .btn:hover,
+.main .staff-actions .btn:hover,
+.main .data-table td .btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+.main .wa-actions .btn i,
+.main .actions .btn i,
+.main .staff-actions .btn i,
+.main .data-table td .btn i {
+  font-size: var(--ui-consistent-icon-size) !important;
+}
+
+/* Keep search clear and dropdown caret visually aligned with text. */
+.main .search-box .search-clear-btn,
+.main .dropdown-toggle i,
+.main .dropdown-toggle svg {
+  vertical-align: middle;
+}
+
+/* Keep modal/drawer typography compact and consistent without changing page headers. */
+:root {
+  --ui-modal-header-title-size: 18px;
+  --ui-modal-section-title-size: 15px;
+  --ui-modal-label-size: 13.5px;
+  --ui-modal-control-size: 14px;
+  --ui-modal-hint-size: 12px;
+}
+
+.side-drawer .drawer-header h2,
+.side-drawer .drawer-header h3,
+.side-drawer .drawer-header .drawer-title,
+.drawer-content .drawer-header h2,
+.drawer-content .drawer-header h3,
+.drawer-content .drawer-header .drawer-title,
+.side-modal .modal-header h2,
+.side-modal .modal-header h3,
+.modal-center .modal-header h2,
+.modal-center .modal-header h3 {
+  font-size: var(--ui-modal-header-title-size) !important;
+  line-height: 1.25 !important;
+}
+
+.side-drawer .section-title,
+.side-drawer .permission-header,
+.drawer-content .section-title,
+.drawer-content .permission-header,
+.side-modal .section-title,
+.side-modal .permission-header,
+.modal-center .section-title,
+.modal-center .permission-header {
+  font-size: var(--ui-modal-section-title-size) !important;
+  line-height: 1.25 !important;
+}
+
+.side-drawer .section-title i,
+.side-drawer .permission-header i,
+.drawer-content .section-title i,
+.drawer-content .permission-header i,
+.side-modal .section-title i,
+.side-modal .permission-header i,
+.modal-center .section-title i,
+.modal-center .permission-header i {
+  font-size: var(--ui-modal-section-title-size) !important;
+}
+
+.side-drawer .form-label,
+.side-drawer .form-group > label,
+.drawer-content .form-label,
+.drawer-content .form-group > label,
+.side-modal .form-label,
+.side-modal .form-group > label,
+.modal-center .form-label,
+.modal-center .form-group > label {
+  font-size: var(--ui-modal-label-size) !important;
+  line-height: 1.2 !important;
+}
+
+.side-drawer .form-input,
+.side-drawer .form-select,
+.side-drawer .form-textarea,
+.side-drawer .dropdown-toggle,
+.side-drawer .dropdown-option,
+.side-drawer .client-multiselect-header,
+.side-drawer .client-multiselect-item,
+.side-drawer .client-multiselect-empty,
+.side-drawer .client-multiselect-search input,
+.drawer-content .form-input,
+.drawer-content .form-select,
+.drawer-content .form-textarea,
+.drawer-content .dropdown-toggle,
+.drawer-content .dropdown-option,
+.drawer-content .client-multiselect-header,
+.drawer-content .client-multiselect-item,
+.drawer-content .client-multiselect-empty,
+.drawer-content .client-multiselect-search input,
+.side-modal .form-input,
+.side-modal .form-select,
+.side-modal .form-textarea,
+.side-modal .dropdown-toggle,
+.side-modal .dropdown-option,
+.side-modal .client-multiselect-header,
+.side-modal .client-multiselect-item,
+.side-modal .client-multiselect-empty,
+.side-modal .client-multiselect-search input,
+.modal-center .form-input,
+.modal-center .form-select,
+.modal-center .form-textarea,
+.modal-center .dropdown-toggle,
+.modal-center .dropdown-option,
+.modal-center .client-multiselect-header,
+.modal-center .client-multiselect-item,
+.modal-center .client-multiselect-empty,
+.modal-center .client-multiselect-search input {
+  font-size: var(--ui-modal-control-size) !important;
+  line-height: 1.2 !important;
+}
+
+.side-drawer .field-hint,
+.side-drawer .form-label-hint,
+.drawer-content .field-hint,
+.drawer-content .form-label-hint,
+.side-modal .field-hint,
+.side-modal .form-label-hint,
+.modal-center .field-hint,
+.modal-center .form-label-hint {
+  font-size: var(--ui-modal-hint-size) !important;
+  line-height: 1.3 !important;
+}
+
+.modal-center .modal-body-title {
+  font-size: var(--ui-modal-header-title-size) !important;
+}
+
+.modal-center .modal-body-subtitle {
+  font-size: var(--ui-modal-control-size) !important;
+}
+
+/* Status Badges - uniform icon-only rounded square status badge overrides for Dashboard, and text badges elsewhere */
+/* Status Badges - uniform icon-only rounded square status badge overrides for Dashboard, and text badges elsewhere */
+.dashboard-client-status-badge,
+.assist-status-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 24px !important;
+    min-width: 24px !important;
+    max-width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    border-radius: 4px !important; /* Slightly rounded corners */
+    font-size: 0 !important;
+    color: transparent !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+    margin: 0 4px !important;
+    vertical-align: middle !important;
+    overflow: visible !important;
+}
+
+.status-badge,
+.staff-status-badge,
+.client-status-badge,
+.reprint-status-badge,
+.email-status-badge,
+.wf-status-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 12px !important;
+    border-radius: 4px !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    line-height: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    text-transform: capitalize !important;
+    box-shadow: none !important;
+    margin: 0 4px !important;
+    vertical-align: middle !important;
+    border: 1px solid transparent !important;
+    box-sizing: border-box !important;
+}
+
+/* Standalone badges in action bars and headers match the 32px button and dropdown continuity */
+.action-bar .status-badge,
+.action-bar .badge,
+.topbar .status-badge,
+.topbar .badge,
+.search-filter-bar .status-badge,
+.search-filter-bar .badge {
+    height: 32px !important;
+    min-height: 32px !important;
+    line-height: 32px !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    border-radius: 4px !important;
+}
+
+/* Pseudo-elements for dashboard icon badges */
+.dashboard-client-status-badge::before,
+.assist-status-badge::before {
+    font-family: "Font Awesome 6 Free" !important;
+    font-weight: 900 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-style: normal !important;
+    font-variant: normal !important;
+    text-rendering: auto !important;
+    -webkit-font-smoothing: antialiased !important;
+    font-size: 12px !important; /* Centered check/cross inside 24x24px */
+    line-height: 1 !important;
+    width: 24px !important;
+    height: 24px !important;
+}
+
+/* Remove icon prefix from other status badges so they only show text */
+.status-badge::before,
+.status-badge::after,
+.staff-status-badge::before,
+.staff-status-badge::after,
+.client-status-badge::before,
+.client-status-badge::after,
+.reprint-status-badge::before,
+.reprint-status-badge::after,
+.email-status-badge::before,
+.email-status-badge::after,
+.wf-status-badge::before,
+.wf-status-badge::after {
+    content: none !important;
+}
+
+/* Active status styles */
+.status-badge.active,
+.status-badge.status-active,
+.status-badge.status-printed,
+.dashboard-client-status-badge.is-active,
+.assist-status-badge:not(.inactive),
+.staff-status-badge.active,
+.client-status-badge.active,
+.email-status-badge.sent {
+    background: #d1fae5 !important; /* Green-100 */
+    border-color: #6ee7b7 !important; /* Green-300 */
+    color: #065f46 !important; /* Green-800 */
+}
+.dashboard-client-status-badge.is-active::before,
+.assist-status-badge:not(.inactive)::before {
+    content: "\f00c" !important; /* checkmark */
+    color: #065f46 !important;
+}
+
+/* Inactive / Deleted / Failed status styles */
+.status-badge.inactive,
+.status-badge.status-inactive,
+.status-badge.status-deleted,
+.dashboard-client-status-badge.is-inactive,
+.assist-status-badge.inactive,
+.staff-status-badge.inactive,
+.client-status-badge.inactive,
+.email-status-badge.failed {
+    background: #fee2e2 !important; /* Red-100 */
+    border-color: #fca5a5 !important; /* Red-300 */
+    color: #991b1b !important; /* Red-800 */
+}
+.dashboard-client-status-badge.is-inactive::before,
+.assist-status-badge.inactive::before {
+    content: "\f00d" !important; /* times / xmark */
+    color: #991b1b !important;
+}
+
+/* Pending / Suspended / Warning status styles */
+.status-badge.pending,
+.status-badge.status-pending,
+.dashboard-client-status-badge.is-suspended,
+.email-status-badge.pending,
+.email-status-badge.on-hold {
+    background: #ffedd5 !important; /* Orange-100 */
+    border-color: #fdba74 !important; /* Orange-300 */
+    color: #ea580c !important; /* Orange-600 */
+}
+.dashboard-client-status-badge.is-suspended::before,
+.email-status-badge.pending::before,
+.email-status-badge.on-hold::before {
+    content: "\f12a" !important; /* exclamation point */
+    color: #ea580c !important;
+}
+
+
+/* ============================================================
+   CRITICAL LAYOUT FIX: Body margin reset (outside @layer)
+   Tailwind v4 puts its reset inside @layer base, but browser UA
+   stylesheet rules (body { margin: 8px }) are UNLAYERED and win
+   over @layer base rules. This rule is outside any @layer so it
+   correctly overrides the browser default, removing the grey strip
+   at the top of the page.
+   ============================================================ */
+html,
+body {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Empty State Styling - Clean, simple text-only look to match default design, and remove table td text capitalization */
+.empty-row,
+.empty-row td,
+.empty-row td.empty-cell {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    padding: 32px 0 !important;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    text-align: center;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.empty-state i {
+    font-size: 41px;
+    color: #94a3b8;
+    margin-bottom: 16px;
+    display: block;
+}
+
+.empty-state h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #64748b;
+    margin-bottom: 6px;
+    text-transform: none !important; /* override table cell capitalization */
+}
+
+.empty-state p {
+    font-size: 14px;
+    color: #94a3b8;
+    margin-bottom: 0;
+    text-transform: none !important; /* override table cell capitalization */
+}
+
+/* Pagination bar alignment and padding-bottom crop prevention */
+.pagination-bar {
+    padding: 8px 16px !important;
+    background: #ffffff !important;
+    border-top: 1px solid #e2e8f0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
+}
+
+/* Fix for dynamic badge container overflow lines */
+.dynamic-badge-container {
+    max-height: 20px !important;
+}
+.staff-assignment-chip {
+    line-height: 1.2 !important;
+}
+
+
+/* ── Universal Standardized Control Typography Enforcement (14px Strict Uniformity) ── */
+/* All buttons across the application */
+.btn,
+button.btn,
+.cf-btn,
+button.cf-btn,
+.action-btn,
+.table-btn,
+.btn-sm,
+.btn-md,
+.btn-lg,
+.btn-icon,
+.btn-icon-sm,
+.btn-primary,
+.btn-secondary,
+.btn-neutral,
+.btn-danger,
+.btn-warning,
+.btn-success,
+.btn-blue,
+.action-bar .btn,
+.action-bar-light .btn,
+.notif-actions-bar .btn,
+.reprint-subnav-tab,
+.idcard-status-tab,
+.tab-btn {
+  font-size: 14px !important;
+}
+
+/* All badges across the application */
+.badge,
+.status-badge,
+.staff-status-badge,
+.client-status-badge,
+.reprint-status-badge,
+.email-status-badge,
+.wf-status-badge,
+.count-badge,
+[class*='status-pill'],
+[class*='count-badge'],
+.action-bar .badge,
+.action-bar .status-badge,
+.topbar .badge,
+.topbar .status-badge,
+.search-filter-bar .badge,
+.search-filter-bar .status-badge,
+.badge-primary,
+.badge-success,
+.badge-danger,
+.badge-warning,
+.badge-blue,
+.badge-purple,
+.badge-teal,
+.badge-neutral,
+.badge-pending,
+.badge-verified,
+.badge-approved,
+.badge-printed,
+.badge-download,
+.badge-pool,
+.badge-expired,
+.badge-active,
+.badge-inactive {
+  font-size: 14px !important;
+}
+
+/* All dropdowns, selects, and dropdown menu options */
+select,
+option,
+select option,
+.dropdown-toggle,
+.dropdown-option,
+.dropdown-item,
+.custom-select-container button,
+.custom-select-menu button,
+.custom-select-menu [role='option'],
+.form-select,
+.form-select-sm,
+.side-drawer .dropdown-option,
+.drawer-content .dropdown-option,
+.side-modal .dropdown-option,
+.modal-center .dropdown-option,
+.side-drawer .form-select,
+.drawer-content .form-select,
+.side-modal .form-select,
+.modal-center .form-select {
+  font-size: 14px !important;
+}
+
+/* All toggles, switches, and checkbox/radio labels */
+.toggle,
+.toggle-switch,
+.toggle-label,
+.switch,
+.switch-label,
+.custom-checkbox-wrapper,
+.custom-checkbox-wrapper span,
+.checkbox-label,
+.form-check-label,
+label.toggle,
+.template-default-toggle,
+.email-toggle,
+.toggle-switch-container {
+  font-size: 14px !important;
+}
+
+
+/* ── Universal Standardized Border Radius System (Design Tokens Alignment) ── */
+/* All buttons, action controls, and tabs (6px standardized) */
+.btn,
+button.btn,
+.cf-btn,
+button.cf-btn,
+.action-btn,
+.table-btn,
+.btn-sm,
+.btn-md,
+.btn-icon,
+.btn-icon-sm,
+.btn-primary,
+.btn-secondary,
+.btn-neutral,
+.btn-danger,
+.btn-warning,
+.btn-success,
+.btn-blue,
+.action-bar .btn,
+.action-bar-light .btn,
+.notif-actions-bar .btn,
+.reprint-subnav-tab,
+.idcard-status-tab,
+.tab-btn,
+.status-tab {
+  border-radius: 6px !important;
+}
+
+.btn-lg {
+  border-radius: 8px !important;
+}
+
+/* All searchbars, inputs, textareas, and wrappers (6px controls, 8px form fields) */
+.search-box,
+.search-box input,
+.search-input,
+.notif-search-box,
+.notif-search-box input,
+.ui-search-box,
+.action-bar .search-box,
+.action-bar-light .search-box {
+  border-radius: 6px !important;
+}
+
+.cf-input-wrapper,
+.cf-input-wrapper input,
+input[type='text'],
+input[type='search'],
+input[type='date'],
+input[type='password'],
+input[type='number'],
+.form-input,
+.form-textarea,
+textarea {
+  border-radius: 8px !important;
+}
+
+/* Status badges, tags, and chips (6px compact, fully rounded for pill counters) */
+.badge,
+.status-badge,
+.staff-status-badge,
+.client-status-badge,
+.reprint-status-badge,
+.email-status-badge,
+.wf-status-badge,
+.action-bar .badge,
+.action-bar .status-badge,
+.topbar .badge,
+.topbar .status-badge,
+.search-filter-bar .badge,
+.search-filter-bar .status-badge,
+.dashboard-client-status-badge,
+.assist-status-badge,
+.badge-primary,
+.badge-success,
+.badge-danger,
+.badge-warning,
+.badge-blue,
+.badge-purple,
+.badge-teal,
+.badge-neutral,
+.badge-pending,
+.badge-verified,
+.badge-approved,
+.badge-printed,
+.badge-download,
+.badge-pool,
+.badge-expired,
+.badge-active,
+.badge-inactive {
+  border-radius: 6px !important;
+}
+
+.count-badge,
+.status-tab-count,
+.status-tab .status-tab-count,
+[class*='status-pill'],
+[class*='count-badge'] {
+  border-radius: 9999px !important;
+}
+
+/* All dropdowns, selects, and dropdown menus (8px menu, 6px trigger) */
+select,
+.dropdown-toggle,
+.form-select,
+.form-select-sm,
+.action-bar select,
+.search-filter-bar select,
+.custom-select-container button {
+  border-radius: 6px !important;
+}
+
+.custom-select-menu,
+.dropdown-menu,
+.select-menu {
+  border-radius: 8px !important;
+}
+
+.custom-select-menu button,
+.custom-select-menu [role='option'],
+.dropdown-option,
+.dropdown-item {
+  border-radius: 6px !important;
+}
+
+/* Stat cards, dashboard panels, and containers (10px rounded) */
+.stat-card-glass,
+.stat-card,
+[class*='stat-block'],
+.dashboard-card,
+.info-card,
+.settings-card {
+  border-radius: 10px !important;
+}
+
+/* Slide-over drawers (12px rounded top-left & bottom-left) */
+.side-drawer,
+.side-drawer-panel,
+[class*='side-drawer'] {
+  border-radius: 12px 0 0 12px !important;
+}
+
+/* Elevated Sidebar Navigation Items */
+.sidebar .nav-item,
+.nav-item,
+.sidebar-tutorial-pinned .nav-item {
+  border-radius: 7px !important;
+  font-size: 13px !important;
+}
+
+/* Universal Table Cells: Generous, Comfortable & Highly Legible Spacing */
+table th,
+.data-table th,
+.idcard-table th,
+.table-container th {
+  padding: 6px 10px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+}
+
+table td,
+.data-table td,
+.table-container td {
+  padding: 7px 10px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+}
+
+.idcard-table td,
+.idcard-table td.dynamic-field {
+  padding: 8px 10px !important;
+  height: 68px !important;
+  min-height: 68px !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+}
+
+/* Compact alignments for fixed columns */
+.idcard-table th.checkbox-col,
+.idcard-table td.checkbox-col,
+.idcard-table th.checkbox-cell,
+.idcard-table td.checkbox-cell {
+  padding: 0 4px !important;
+}
+
+.idcard-table th.sr-col,
+.idcard-table td.sr-col {
+  padding: 0 6px !important;
+}
+
+.idcard-table td.image-cell {
+  padding: 4px 6px !important;
+}
+
+.idcard-table td.action-cell,
+.idcard-table td.action-col {
+  padding: 6px 8px !important;
+}
+
+table th,
+.data-table th,
+.idcard-table th {
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+}
+
+table td,
+.data-table td,
+.idcard-table td,
+.idcard-table td.dynamic-field {
+  font-size: 13px !important;
+}
+
+/* Universal Tab Options: Sleek, Streamlined & Standardized 13px Across All Pages */
+.status-tabs,
+.idcard-status-tabs,
+.panel-tabs-track,
+.panel-tabs,
+.sub-nav-tabs,
+.settings-tabs {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 2px !important;
+  gap: 3px !important;
+  box-sizing: border-box !important;
+  border-radius: 6px !important;
+}
+
+.status-tab,
+.idcard-status-tab,
+.panel-tab,
+.tab-btn,
+.nav-tab,
+.status-tab-btn,
+.reprint-subnav-tab,
+.sub-nav-tab,
+.filter-tab,
+.settings-tab {
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 28px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+  border-radius: 5px !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+}
+
+.status-tab-count,
+.status-tab .status-tab-count,
+.tab-count,
+.panel-tab-badge {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  padding: 0 5px !important;
+  min-width: 18px !important;
+  height: 18px !important;
+  line-height: 18px !important;
+  border-radius: 4px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* ── Sticky Table Headers Anti-Bleed & Clean Scrolling ── */
+table thead,
+.data-table thead,
+.idcard-table thead,
+.table-container thead {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 25 !important;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important;
+  box-shadow: 0 -4px 0 0 #1e293b, 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  border-bottom: 2px solid #0f172a !important;
+}
+
+table thead th,
+.data-table thead th,
+.idcard-table thead th,
+.table-container thead th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 25 !important;
+}
+
+/* ── Universal Dashboard View Table Headers: Strict 30px Height Matching Right Rail ── */
+.dashboard-view-container thead {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 25 !important;
+  background: #1e293b !important;
+  box-shadow: 0 -4px 0 0 #1e293b !important;
+  border-bottom: 1px solid #334155 !important;
+}
+
+.dashboard-view-container thead tr {
+  height: 38px !important;
+  min-height: 38px !important;
+}
+
+.dashboard-view-container thead th {
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 6px 10px !important;
+  box-sizing: border-box !important;
+  border-bottom: 2px solid #0f172a !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  vertical-align: middle !important;
+  line-height: 1.25 !important;
+  background: #1e293b !important;
+  color: #ffffff !important;
+  font-size: 13px !important; letter-spacing: 0.04em !important;
+  font-weight: 700 !important;
+}
+
+.dashboard-view-container thead th:last-child {
+  border-right: none !important;
+}
+
+.table-container,
+.table-wrapper,
+.idcard-table {
+  overscroll-behavior: contain;
+}
+
+/* ── Responsive Polish: Perfectly Working down to 1000px Screens ── */
+@media (min-width: 1000px) and (max-width: 1280px) {
+  /* Ensure stat cards don't squish numbers on compact desktops */
+  .stat-card-glass {
+    padding: 6px 10px !important;
+    gap: 6px !important;
+  }
+
+  .stat-card-glass > div > div:first-child {
+    font-size: 20px !important;
+  }
+
+  /* Table action bars scroll cleanly if needed */
+  .topbar,
+  .action-bar,
+  .action-bar-light {
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+  }
+
+  /* Search box in table toolbar scales gracefully */
+  .action-bar .search-box,
+  .action-bar-light .search-box,
+  .unified-action-bar .search-box {
+    width: 200px !important;
+    min-width: 120px !important;
+    flex: 0 1 200px !important;
+  }
+}
+
+/* ??????????????????????????????????????????????????????????????????????????????
+   MASTER DIRECTIVE: UNIVERSAL SITEWIDE UPPERCASE ENFORCEMENT & TYPOGRAPHY SYSTEM
+   ?????????????????????????????????????????????????????????????????????????????? */
+body,
+#root,
+button,
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-success,
+.btn-danger,
+.btn-warning,
+.btn-info,
+.action-btn,
+.table-btn,
+.btn-sm,
+.btn-lg,
+table th,
+.data-table th,
+.idcard-table th,
+table td,
+.data-table td,
+.idcard-table td,
+.status-tab,
+.idcard-status-tab,
+.panel-tab,
+.tab-btn,
+.nav-tab,
+.status-tab-btn,
+.reprint-subnav-tab,
+.sub-nav-tab,
+.filter-tab,
+.settings-tab,
+.badge,
+.status-badge,
+.count-badge,
+.nav-item,
+.sidebar-link,
+.card-title,
+.section-title,
+.panel-title,
+.box-header,
+.table-title,
+.modal-title,
+.drawer-title,
+.breadcrumb,
+.breadcrumb-item,
+.dropdown-item,
+label,
+.form-label,
+select,
+option,
+input::placeholder,
+textarea::placeholder {
+  text-transform: uppercase !important;
+}
+
+/* Explicit technical exemptions to preserve case where required */
+input[type="password"],
+input[type="email"],
+input[type="url"],
+input.preserve-case,
+textarea.preserve-case,
+.preserve-case,
+.preserve-case *,
+code,
+pre,
+kbd,
+samp {
+  text-transform: none !important;
+}
+
+/* Footer Total Count & Selection Badges: Sleek, compact 12px with 4px design system radius */
+.footer-badge {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-radius: 4px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.02em !important;
+}

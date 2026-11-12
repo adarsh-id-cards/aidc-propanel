@@ -1,0 +1,3 @@
+# CardFlow Monorepo Root Requirements
+# Mirrors backend/requirements.txt for PaaS, Azure App Service, and root-level build engines.
+-r backend/requirements.txt

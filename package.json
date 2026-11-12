@@ -1,0 +1,15 @@
+{
+  "name": "pro-panel",
+  "version": "1.0.0",
+  "description": "Pro Panel — Enterprise Digital ID Card Management Platform (Standalone Tenant Edition)",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "dev:backend": "cd backend && python manage.py runserver 8000",
+    "check:backend": "cd backend && python manage.py check"
+  }
+}
