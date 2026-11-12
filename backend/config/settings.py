@@ -485,12 +485,12 @@ FORCE_SECURE_COOKIES = _env_bool('FORCE_SECURE_COOKIES', False)
 SECURE_COOKIES = (not DEBUG) or FORCE_SECURE_COOKIES
 
 SESSION_COOKIE_HTTPONLY = True          # JS cannot read session cookie
-SESSION_COOKIE_SAMESITE = 'Lax'        # CSRF mitigation
+SESSION_COOKIE_SAMESITE = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax') # 'Lax' for same-site subdomains; 'None' if cross-domain
 SESSION_COOKIE_SECURE = SECURE_COOKIES # Enforce HTTPS when appropriate
 CSRF_COOKIE_SECURE = SECURE_COOKIES    # Enforce HTTPS when appropriate
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 30   # 30-day sessions
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False # Session persists after browser close
-CSRF_COOKIE_SAMESITE = 'Lax'           # CSRF cookie SameSite
+CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')      # 'Lax' for same-site subdomains; 'None' if cross-domain
 # Ensure session cookie expiry is extended on every request.
 SESSION_SAVE_EVERY_REQUEST = False
 
