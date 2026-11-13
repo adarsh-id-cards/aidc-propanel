@@ -63,3 +63,4 @@ This document highlights architectural patterns, legacy considerations, large as
 - **Recommended Action**:
   - Leave existing migrations untouched.
   - Any future schema adjustments must strictly use new, forward-only Django migrations (`python manage.py makemigrations`).
+

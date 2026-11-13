@@ -127,3 +127,4 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 - **Linter**: `oxlint` executed across all 79 JSX/JS files. **0 errors, 0 warnings**.
 - **Production Build**: `vite build` completed in **960ms**, producing clean production assets in `frontend/dist/`.
 - **Dead Assets**: Evaluated `frontend/public/` and `src/assets/`. All assets are referenced by active views.
+
