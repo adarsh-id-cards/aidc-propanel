@@ -189,20 +189,26 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 - **Why Safe**: Eliminates responsibility overlap and enables existing tables with data to pass safely without premature constraint failures.
 
 ### `backend/core/migrations/0110_add_client_id_to_idcardtable.py`
-- **Location**: Lines 1–190
+- **Location**: Entire file
 - **Change**:
   - Acts as the sole authority for final schema reconciliation of `core_idcardtable.client_id`.
+  - Performs schema-specific introspection on PostgreSQL: all column data type, nullability, and foreign key checks are strictly scoped to `CURRENT_SCHEMA` (`table_schema = CURRENT_SCHEMA` and `nspname = CURRENT_SCHEMA`).
+  - Safely inspects and reconciles existing foreign keys on `core_idcardtable.client_id` before attempting integer-to-bigint alteration: drops incompatible or non-CASCADE FKs first so PostgreSQL never blocks column widening.
+  - Verifies legacy table `core_idcardgroup` and inspects its columns: skips group fallback safely with a diagnostic warning if the table or `client_id` column is missing, avoiding SQL syntax errors.
   - Performs safe legacy data backfill without overwriting non-NULL values, reporting affected row counts separately for `organisation_id` and `group_id`.
+  - Reconciles `deleted_by_manager` / `deleted_by_client` column mapping: if `deleted_by_manager` exists, renames it to `deleted_by_client` without data loss; if missing, adds `deleted_by_client bool NOT NULL DEFAULT FALSE` (or `DEFAULT 0` on SQLite); if already present, leaves it untouched.
   - Audits table data for ambiguity: if candidate sources conflict (`organisation_id <> group.client_id`), raises a descriptive exception with conflict details rather than guessing.
-  - Audits table data for NULLs and orphan foreign keys (`client_id NOT IN (SELECT id FROM core_client)`). If any remain, raises a clear `RuntimeError` with exact counts, sample IDs, and administrator remediation instructions; never silently succeeds with an incomplete schema.
+  - Audits table data for NULLs and orphan foreign keys (`client_id NOT IN (SELECT id FROM core_client)`). If any remain, raises a clear `RuntimeError` with exact counts, sample IDs, and administrator remediation instructions; never silently succeeds with an incomplete schema. On an empty table (the verified VPS baseline), audits pass cleanly.
   - Widens PostgreSQL column from `integer` to `bigint`.
-  - Verifies foreign key constraints with exact catalog matching: source table, schema, source column, referenced table, referenced schema, referenced column, single-column cardinality, `confdeltype = 'c'` (`ON DELETE CASCADE`), and `convalidated = True`. Replaces non-CASCADE or invalid FKs idempotently while avoiding dropping unrelated constraints.
+  - Creates validated `ON DELETE CASCADE` foreign key referencing `core_client(id)`.
+  - Independently verifies the newly created foreign key against all criteria in `pg_constraint`: source table, source schema, source column, referenced table, referenced schema, referenced column, single-column cardinality, `confdeltype = 'c'`, and `convalidated = True`. Fails fast if verification is not satisfied.
   - Reconciles nullability with the Django model by setting `client_id SET NOT NULL` if and only if `null_count == 0` and `orphan_count == 0`. Never deletes or silently reassigns orphan rows.
-- **Why Safe**: Guarantees complete schema agreement between Django models and PostgreSQL/SQLite databases with zero data loss and safe re-running after data remediation.
+  - Retries are safe after partial execution (`atomic=False`): every DDL and backfill step is check-before-act and idempotent.
+- **Why Safe**: Guarantees complete schema agreement between Django models and PostgreSQL/SQLite databases with zero data loss, schema-specific isolation, and safe re-running after data remediation.
 
 ### `backend/core/test_migration_0110.py`
 - **Location**: Entire file
-- **Action**: Dedicated unit and integration test suite with test-server isolation, strict allowlist enforcement, independent admin database safety validation, non-destructive lifecycle, and zero-credential offline execution:
+- **Action**: Dedicated unit, offline mock, and integration test suite with test-server isolation, strict allowlist enforcement, independent admin database safety validation, non-destructive lifecycle, and zero-credential offline execution:
   1. **Strict Opt-In & No Silent Defaults**:
      - PostgreSQL integration tests are disabled by default via `RUN_PG_MIGRATION_INTEGRATION_TESTS=1`. Without this explicit flag, integration tests cleanly skip without attempting any network connection.
      - Removed all default fallback passwords, hosts, ports, and admin database names (no default `postgres`).
@@ -225,17 +231,22 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
      - If database creation fails, cleanup stops without attempting to drop anything.
      - Safe cleanup guarantees both test and admin connections are closed even if database drop fails. Emits clear errors with database name and exception details to stderr and logger without masking original test failures.
      - Never uses `DROP DATABASE IF EXISTS` or `pg_terminate_backend`.
-  5. **Isolated SQLite Unit Tests (Zero Credentials)**: 8 fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
+  5. **Isolated SQLite Unit Tests (12 tests, Zero Credentials)**: Fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
+     - Empty existing table (verified VPS baseline) completes cleanly.
+     - `deleted_by_manager` safely renamed to `deleted_by_client` without data loss.
+     - Missing group table skipped safely.
+     - Missing `group.client_id` column skipped safely with diagnostic warning.
      - NULL rows successfully backfilled from `organisation_id`.
      - NULL rows successfully backfilled from `group_id`.
      - Non-overwriting of existing valid `client_id`.
      - Migration fails fast with clear remediation instructions when NULL rows have no valid source.
      - Migration fails fast with clear remediation instructions when orphan references exist.
      - Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
-     - Migration re-runs safely and succeeds after administrator data remediation (idempotent).
+     - Migration re-runs safely and succeeds after administrator data remediation (idempotent retry).
      - SQLite existing-table path compatibility.
-  6. **Safety Guard Tests (20 tests)**: Verifies default skip behavior, missing credential rejection, missing allowlist rejection, approved host/port validation, unapproved host rejection, unapproved port rejection, malformed host/port rejection, production setting rejection under isolated server policy, production admin DB rejection before connection, valid test admin DB acceptance, admin DB naming policy enforcement, no connection attempt when validation fails, cleanup failure reporting with connection closure, refusal to drop when creation fails, production DB/user protection, and refusal to overwrite pre-existing databases.
-  7. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on an approved, isolated disposable PostgreSQL test server.
+  6. **PostgreSQL Offline Mock Tests (2 tests)**: Verifies DDL ordering (dropping non-cascade FKs before column type widening), schema-specific query generation (`table_schema = CURRENT_SCHEMA`, `nspname = CURRENT_SCHEMA`), and post-creation FK independent catalog verification failure reporting.
+  7. **Safety Guard Tests (20 tests)**: Verifies default skip behavior, missing credential rejection, missing allowlist rejection, approved host/port validation, unapproved host rejection, unapproved port rejection, malformed host/port rejection, production setting rejection under isolated server policy, production admin DB rejection before connection, valid test admin DB acceptance, admin DB naming policy enforcement, no connection attempt when validation fails, cleanup failure reporting with connection closure, refusal to drop when creation fails, production DB/user protection, and refusal to overwrite pre-existing databases.
+  8. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on an approved, isolated disposable PostgreSQL test server.
 
 ### `backend/core/migrations/0108_add_org_role_to_organisation.py`
 - **Status**: Verified idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`. Safe for databases where `org_role` already exists.
@@ -251,7 +262,7 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 | **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
 | **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
 | **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
-| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **28 passed, 1 skipped in 0.22s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
+| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **34 passed, 1 skipped in 0.22s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
 | **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
 | **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
 | **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 62.83s. |

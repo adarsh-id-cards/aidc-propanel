@@ -14,15 +14,19 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
     ON DELETE CASCADE foreign key to core_client(id), and reconciled to NOT NULL.
 
     Safety guarantees:
-    1. Does not overwrite non-NULL client_id.
-    2. Reports affected row counts separately for organisation_id and group_id.
-    3. Fails with clear diagnostic exception if ambiguous ownership is found.
-    4. Fails fast with actionable remediation instructions if unresolvable NULLs
-       or orphan references remain.
-    5. Does not apply NOT NULL or create invalid FK constraints when data is incomplete.
-    6. Verifies exact table, schema, source & referenced column mapping, ON DELETE CASCADE,
-       and convalidated=true on PostgreSQL.
-    7. Fully idempotent and safe to re-run after data remediation.
+    1. Schema-specific introspection: All PostgreSQL column type, nullability,
+       and constraint checks are strictly scoped to CURRENT_SCHEMA.
+    2. Safe FK reconciliation before type widening: Inspects and drops incompatible
+       or non-CASCADE foreign keys before attempting integer-to-bigint alteration.
+    3. Safe legacy table/column checks: Verifies both table existence and required
+       'client_id' column on core_idcardgroup before joining or querying.
+    4. Independent post-creation FK verification: Confirms source table/col,
+       target table/col, single-column mapping, ON DELETE CASCADE, and convalidated=true.
+    5. Preserves existing non-NULL client IDs: Never overwrites valid ownership values
+       or silently assigns an arbitrary organisation.
+    6. Strict audits: Audits NULL and orphan rows before enforcing NOT NULL or creating FKs.
+    7. Reconciles deleted_by_manager / deleted_by_client column mapping safely.
+    8. Idempotent and safe to retry after partial failure (atomic=False).
     """
     connection = schema_editor.connection
     with connection.cursor() as cursor:
@@ -38,8 +42,38 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
             cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL;")
             cols.add('client_id')
 
-        # 2. Ambiguity check: check if any unassigned row has conflicting candidate sources
-        if 'organisation_id' in cols and 'group_id' in cols and 'core_idcardgroup' in tables:
+        # 2. Reconcile deleted_by_manager / deleted_by_client mapping without data loss
+        # The Django model maps Table.deleted_by_manager to db_column='deleted_by_client'.
+        if 'deleted_by_client' not in cols:
+            if 'deleted_by_manager' in cols:
+                logger.info("Renaming core_idcardtable.deleted_by_manager to deleted_by_client.")
+                cursor.execute("ALTER TABLE core_idcardtable RENAME COLUMN deleted_by_manager TO deleted_by_client;")
+                cols.remove('deleted_by_manager')
+                cols.add('deleted_by_client')
+            else:
+                logger.info("Adding core_idcardtable.deleted_by_client column.")
+                if connection.vendor == 'postgresql':
+                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN deleted_by_client bool NOT NULL DEFAULT FALSE;")
+                else:
+                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN deleted_by_client bool NOT NULL DEFAULT 0;")
+                cols.add('deleted_by_client')
+
+        # 3. Check legacy group source table and client_id column existence
+        group_table_exists = 'core_idcardgroup' in tables
+        group_has_client_id = False
+        if group_table_exists:
+            group_desc = connection.introspection.get_table_description(cursor, 'core_idcardgroup')
+            group_cols = {c.name.lower() for c in group_desc}
+            group_has_client_id = 'client_id' in group_cols
+            if not group_has_client_id:
+                logger.warning(
+                    "Legacy table 'core_idcardgroup' exists but lacks 'client_id' column (found cols: %s). "
+                    "Skipping group_id fallback backfill.",
+                    sorted(group_cols)
+                )
+
+        # 4. Ambiguity check: check if any unassigned row has conflicting candidate sources
+        if 'organisation_id' in cols and 'group_id' in cols and group_table_exists and group_has_client_id:
             cursor.execute("""
                 SELECT t.id, t.name, t.organisation_id, g.client_id
                 FROM core_idcardtable t
@@ -63,7 +97,7 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
                     f"  UPDATE core_idcardtable SET client_id = <correct_org_id> WHERE id = <table_id>;"
                 )
 
-        # 3. Safe legacy data backfill (never overwrites existing non-NULL client_id)
+        # 5. Safe legacy data backfill (never overwrites existing non-NULL client_id)
         org_backfill_count = 0
         if 'organisation_id' in cols:
             cursor.execute("""
@@ -76,7 +110,7 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
             org_backfill_count = cursor.rowcount
 
         group_backfill_count = 0
-        if 'group_id' in cols and 'core_idcardgroup' in tables:
+        if 'group_id' in cols and group_table_exists and group_has_client_id:
             cursor.execute("""
                 UPDATE core_idcardtable
                 SET client_id = (
@@ -98,7 +132,7 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
             group_backfill_count,
         )
 
-        # 4. Strict Row Validation Audit
+        # 6. Strict Row Validation Audit
         cursor.execute("SELECT COUNT(*) FROM core_idcardtable WHERE client_id IS NULL;")
         null_count = cursor.fetchone()[0]
 
@@ -143,24 +177,16 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
                 f"Note: Existing records were NOT deleted or silently altered."
             )
 
-        # 5. PostgreSQL-specific Type Widening, FK Verification & NOT NULL Enforcement
+        # 7. PostgreSQL-specific FK reconciliation, Type Widening & NOT NULL Enforcement
         if connection.vendor == 'postgresql':
-            # Check column type
-            cursor.execute("""
-                SELECT data_type FROM information_schema.columns
-                WHERE table_name = 'core_idcardtable' AND column_name = 'client_id';
-            """)
-            col_info = cursor.fetchone()
-            if col_info and col_info[0].lower() in ('integer', 'int4'):
-                cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id TYPE bigint;")
-
-            # Precise PostgreSQL foreign-key constraint verification
-            # Verify source schema, table, column; target schema, table, column; key cardinality; ON DELETE CASCADE; and convalidated
+            # Inspect existing FKs on core_idcardtable.client_id scoped strictly to CURRENT_SCHEMA
             cursor.execute("""
                 SELECT
                     c.conname,
                     c.confdeltype,
-                    c.convalidated
+                    c.convalidated,
+                    ref_t.relname AS ref_table,
+                    ref_a.attname AS ref_col
                 FROM pg_constraint c
                 JOIN pg_class src_t ON c.conrelid = src_t.oid
                 JOIN pg_namespace src_ns ON src_t.relnamespace = src_ns.oid
@@ -169,55 +195,103 @@ def reconcile_idcardtable_client_id(apps, schema_editor):
                 JOIN pg_attribute src_a ON src_a.attrelid = src_t.oid AND src_a.attnum = c.conkey[1]
                 JOIN pg_attribute ref_a ON ref_a.attrelid = ref_t.oid AND ref_a.attnum = c.confkey[1]
                 WHERE c.contype = 'f'
-                  AND src_ns.nspname = CURRENT_SCHEMA()
+                  AND src_ns.nspname = CURRENT_SCHEMA
                   AND src_t.relname = 'core_idcardtable'
                   AND src_a.attname = 'client_id'
-                  AND ref_ns.nspname = CURRENT_SCHEMA()
-                  AND ref_t.relname = 'core_client'
-                  AND ref_a.attname = 'id'
+                  AND ref_ns.nspname = CURRENT_SCHEMA
                   AND array_length(c.conkey, 1) = 1
                   AND array_length(c.confkey, 1) = 1;
             """)
-            fks = cursor.fetchall()
+            existing_fks = cursor.fetchall()
 
-            # Find if an exact, validated CASCADE foreign key already exists
-            valid_cascade_fk = next((conname for conname, deltype, val in fks if deltype == 'c' and val), None)
+            # Inspect current column type and nullability scoped strictly to CURRENT_SCHEMA
+            cursor.execute("""
+                SELECT data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = CURRENT_SCHEMA
+                  AND table_name = 'core_idcardtable'
+                  AND column_name = 'client_id';
+            """)
+            col_info = cursor.fetchone()
+            current_type = col_info[0].lower() if col_info else None
+            is_nullable = col_info[1].upper() if col_info else None
 
-            if not valid_cascade_fk:
-                # Drop only incorrectly scoped or non-CASCADE FKs that specifically link client_id -> core_client(id)
-                for conname, deltype, val in fks:
-                    if deltype != 'c' or not val:
-                        logger.info("Dropping non-cascade or unvalidated FK '%s' on core_idcardtable.client_id.", conname)
-                        cursor.execute(f'ALTER TABLE core_idcardtable DROP CONSTRAINT "{conname}";')
+            # Identify if an exact, valid CASCADE FK to core_client(id) already exists
+            exact_cascade_fk = next(
+                (conname for conname, deltype, val, ref_tbl, ref_col in existing_fks
+                 if deltype == 'c' and val and ref_tbl == 'core_client' and ref_col == 'id'),
+                None
+            )
 
-                # Ensure target constraint name is free if it exists on core_idcardtable with wrong definition
-                cursor.execute("""
-                    SELECT 1 FROM pg_constraint c
-                    JOIN pg_class t ON c.conrelid = t.oid
-                    JOIN pg_namespace n ON t.relnamespace = n.oid
-                    WHERE n.nspname = CURRENT_SCHEMA()
-                      AND t.relname = 'core_idcardtable'
-                      AND c.conname = 'core_idcardtable_client_id_fk_core_client_id';
-                """)
-                if cursor.fetchone():
-                    cursor.execute('ALTER TABLE core_idcardtable DROP CONSTRAINT "core_idcardtable_client_id_fk_core_client_id";')
+            # Step A: Drop incompatible, non-CASCADE, or unvalidated FKs before type alteration
+            for conname, deltype, val, ref_tbl, ref_col in existing_fks:
+                if (deltype != 'c' or not val or ref_tbl != 'core_client' or ref_col != 'id'
+                        or current_type in ('integer', 'int4')):
+                    logger.info("Dropping FK constraint '%s' on core_idcardtable.client_id prior to reconciliation.", conname)
+                    cursor.execute(f'ALTER TABLE core_idcardtable DROP CONSTRAINT "{conname}";')
+                    if conname == exact_cascade_fk:
+                        exact_cascade_fk = None
 
-                # Add the validated CASCADE FK constraint
+            # Ensure target constraint name is not taken by an outdated constraint
+            cursor.execute("""
+                SELECT c.conname FROM pg_constraint c
+                JOIN pg_class t ON c.conrelid = t.oid
+                JOIN pg_namespace n ON t.relnamespace = n.oid
+                WHERE n.nspname = CURRENT_SCHEMA
+                  AND t.relname = 'core_idcardtable'
+                  AND c.conname = 'core_idcardtable_client_id_fk_core_client_id';
+            """)
+            if cursor.fetchone() and not exact_cascade_fk:
+                cursor.execute('ALTER TABLE core_idcardtable DROP CONSTRAINT "core_idcardtable_client_id_fk_core_client_id";')
+
+            # Step B: Alter column type to bigint if currently integer
+            if current_type in ('integer', 'int4'):
+                cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id TYPE bigint;")
+                logger.info("Widened core_idcardtable.client_id from %s to bigint.", current_type)
+
+            # Step C: Create verified CASCADE FK if not already present
+            if not exact_cascade_fk:
                 cursor.execute("""
                     ALTER TABLE core_idcardtable
                         ADD CONSTRAINT core_idcardtable_client_id_fk_core_client_id
                         FOREIGN KEY (client_id) REFERENCES core_client(id) ON DELETE CASCADE;
                 """)
+                logger.info("Created ON DELETE CASCADE FK constraint on core_idcardtable.client_id -> core_client(id).")
 
-            # Enforce NOT NULL on PostgreSQL
-            cursor.execute("""
-                SELECT is_nullable
-                FROM information_schema.columns
-                WHERE table_name = 'core_idcardtable' AND column_name = 'client_id';
-            """)
-            null_res = cursor.fetchone()
-            if null_res and null_res[0].upper() == 'YES':
+                # Step D: Independently verify the newly created FK constraint against all criteria
+                cursor.execute("""
+                    SELECT
+                        c.conname,
+                        c.confdeltype,
+                        c.convalidated
+                    FROM pg_constraint c
+                    JOIN pg_class src_t ON c.conrelid = src_t.oid
+                    JOIN pg_namespace src_ns ON src_t.relnamespace = src_ns.oid
+                    JOIN pg_class ref_t ON c.confrelid = ref_t.oid
+                    JOIN pg_namespace ref_ns ON ref_t.relnamespace = ref_ns.oid
+                    JOIN pg_attribute src_a ON src_a.attrelid = src_t.oid AND src_a.attnum = c.conkey[1]
+                    JOIN pg_attribute ref_a ON ref_a.attrelid = ref_t.oid AND ref_a.attnum = c.confkey[1]
+                    WHERE c.contype = 'f'
+                      AND src_ns.nspname = CURRENT_SCHEMA
+                      AND src_t.relname = 'core_idcardtable'
+                      AND src_a.attname = 'client_id'
+                      AND ref_ns.nspname = CURRENT_SCHEMA
+                      AND ref_t.relname = 'core_client'
+                      AND ref_a.attname = 'id'
+                      AND array_length(c.conkey, 1) = 1
+                      AND array_length(c.confkey, 1) = 1;
+                """)
+                verified_fks = cursor.fetchall()
+                if not any(deltype == 'c' and val for _, deltype, val in verified_fks):
+                    raise RuntimeError(
+                        "Foreign key verification failed: constraint on core_idcardtable.client_id "
+                        "referencing core_client(id) [ON DELETE CASCADE, validated] was not found in pg_catalog."
+                    )
+
+            # Step E: Enforce NOT NULL on PostgreSQL
+            if is_nullable == 'YES':
                 cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id SET NOT NULL;")
+                logger.info("Enforced NOT NULL on core_idcardtable.client_id.")
 
         logger.info("core_idcardtable.client_id schema reconciliation successfully completed.")
 

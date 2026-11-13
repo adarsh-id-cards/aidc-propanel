@@ -361,6 +361,10 @@ class Migration0110UnitTests(TestCase):
     6. Non-overwriting of existing valid client_id
     7. Safe re-running after data remediation (idempotent)
     8. SQLite existing-table path compatibility
+    9. Empty existing table (verified VPS state)
+    10. deleted_by_manager safely renamed to deleted_by_client without data loss
+    11. Missing group table skipped safely
+    12. Missing group.client_id column skipped safely with diagnostic warning
     """
 
     def setUp(self):
@@ -394,6 +398,18 @@ class Migration0110UnitTests(TestCase):
 
     def tearDown(self):
         self.conn.close()
+
+    def test_empty_existing_table_succeeds_cleanly(self):
+        """Empty existing table (the verified VPS state) reconciles cleanly with zero errors."""
+        # Table has zero rows initially
+        self.cur.execute("SELECT COUNT(*) FROM core_idcardtable;")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+        # Migration runs and completes successfully
+        reconcile_idcardtable_client_id(None, self.schema_editor)
+
+        # Idempotent re-run
+        reconcile_idcardtable_client_id(None, self.schema_editor)
 
     def test_null_rows_successfully_backfilled_from_organisation_id(self):
         """NULL client_id is safely backfilled from organisation_id when organisation_id is valid."""
@@ -524,6 +540,202 @@ class Migration0110UnitTests(TestCase):
         """SQLite existing-table path validates cleanly and remains idempotent."""
         reconcile_idcardtable_client_id(None, self.schema_editor)
         reconcile_idcardtable_client_id(None, self.schema_editor)
+
+    def test_deleted_by_manager_renamed_to_deleted_by_client_safely(self):
+        """When deleted_by_manager exists instead of deleted_by_client, it is renamed safely without data loss."""
+        # Recreate table with deleted_by_manager
+        self.cur.execute("DROP TABLE core_idcardtable;")
+        self.cur.execute("""
+            CREATE TABLE core_idcardtable (
+                id integer PRIMARY KEY AUTOINCREMENT,
+                name varchar(255) NOT NULL,
+                client_id bigint NOT NULL,
+                deleted_by_manager bool NOT NULL DEFAULT 1
+            );
+        """)
+        self.cur.execute("INSERT INTO core_idcardtable (id, name, client_id, deleted_by_manager) VALUES (1, 'Legacy Del', 1, 1);")
+        self.conn.commit()
+
+        reconcile_idcardtable_client_id(None, self.schema_editor)
+
+        # Verify column was renamed to deleted_by_client and value 1 was preserved
+        self.cur.execute("SELECT deleted_by_client FROM core_idcardtable WHERE id = 1;")
+        self.assertEqual(self.cur.fetchone()[0], 1)
+
+    def test_missing_group_table_skipped_safely(self):
+        """Missing core_idcardgroup table does not cause syntax error; org backfill proceeds safely."""
+        self.cur.execute("""
+            INSERT INTO core_idcardtable (id, name, created_at, updated_at, client_id, organisation_id, group_id)
+            VALUES (80, 'No Group Table', datetime('now'), datetime('now'), NULL, 1, 999);
+        """)
+        self.conn.commit()
+
+        # core_idcardgroup table does not exist
+        reconcile_idcardtable_client_id(None, self.schema_editor)
+
+        self.cur.execute("SELECT client_id FROM core_idcardtable WHERE id = 80;")
+        self.assertEqual(self.cur.fetchone()[0], 1)
+
+    def test_group_table_missing_client_id_column_skipped_safely(self):
+        """core_idcardgroup table lacking client_id column is skipped safely with a diagnostic warning."""
+        self.cur.execute("""
+            CREATE TABLE core_idcardgroup (
+                id integer PRIMARY KEY AUTOINCREMENT,
+                name varchar(255) NOT NULL
+            );
+        """)
+        self.cur.execute("INSERT INTO core_idcardgroup (id, name) VALUES (10, 'Incomplete Group');")
+        self.cur.execute("""
+            INSERT INTO core_idcardtable (id, name, created_at, updated_at, client_id, organisation_id, group_id)
+            VALUES (90, 'Incomplete Group Source Table', datetime('now'), datetime('now'), NULL, 1, 10);
+        """)
+        self.conn.commit()
+
+        reconcile_idcardtable_client_id(None, self.schema_editor)
+
+        self.cur.execute("SELECT client_id FROM core_idcardtable WHERE id = 90;")
+        self.assertEqual(self.cur.fetchone()[0], 1)
+
+
+class Migration0110PostgresOfflineMockTests(TestCase):
+    """
+    Offline mock unit tests verifying PostgreSQL-specific behavior:
+    - Schema-specific introspection using CURRENT_SCHEMA
+    - Incompatible / non-CASCADE FK dropped before integer-to-bigint alteration
+    - Column widened to bigint
+    - Cascade FK added and independently verified
+    - Independent verification raises error if FK not verified in catalog
+    - Multi-schema isolation: CURRENT_SCHEMA restriction prevents foreign schemas from leaking
+    """
+
+    def test_pg_schema_specific_queries_and_fk_drop_before_type_widening(self):
+        """PostgreSQL DDL drops existing non-cascade FKs BEFORE altering column type, and verifies newly created FK."""
+        executed_sqls = []
+
+        class MockCursor:
+            def __init__(self):
+                self.fks = [('old_restrict_fk', 'r', True, 'core_client', 'id')]
+                self.col_info = ('integer', 'YES')
+                self.fk_verified = False
+
+            def execute(self, sql, params=None):
+                executed_sqls.append(sql.strip())
+                if 'ADD CONSTRAINT' in sql.upper():
+                    self.fk_verified = True
+
+            def fetchone(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "COUNT(*)" in last_sql:
+                    return (0,)
+                if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
+                    return self.col_info
+                if "SELECT C.CONNAME FROM PG_CONSTRAINT" in last_sql:
+                    return None
+                return None
+
+            def fetchall(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "FROM PG_CONSTRAINT" in last_sql:
+                    if self.fk_verified:
+                        return [('core_idcardtable_client_id_fk_core_client_id', 'c', True)]
+                    return self.fks
+                return []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        mock_conn = SimpleNamespace(
+            cursor=lambda: MockCursor(),
+            vendor='postgresql',
+            introspection=SimpleNamespace(
+                table_names=lambda c: ['core_idcardtable', 'core_client'],
+                get_table_description=lambda c, t: [
+                    SimpleNamespace(name='id'),
+                    SimpleNamespace(name='name'),
+                    SimpleNamespace(name='client_id'),
+                    SimpleNamespace(name='deleted_by_client'),
+                ]
+            )
+        )
+        schema_editor = SimpleNamespace(connection=mock_conn)
+
+        reconcile_idcardtable_client_id(None, schema_editor)
+
+        # Verify ordering:
+        # 1. DROP CONSTRAINT of old_restrict_fk must occur BEFORE ALTER COLUMN client_id TYPE bigint
+        drop_idx = next(i for i, sql in enumerate(executed_sqls) if 'DROP CONSTRAINT "old_restrict_fk"' in sql)
+        widen_idx = next(i for i, sql in enumerate(executed_sqls) if 'ALTER COLUMN client_id TYPE bigint' in sql)
+        add_fk_idx = next(i for i, sql in enumerate(executed_sqls) if 'ADD CONSTRAINT core_idcardtable_client_id_fk_core_client_id' in sql)
+        set_not_null_idx = next(i for i, sql in enumerate(executed_sqls) if 'ALTER COLUMN client_id SET NOT NULL' in sql)
+
+        self.assertLess(drop_idx, widen_idx, "Incompatible FK must be dropped before column type widening.")
+        self.assertLess(widen_idx, add_fk_idx, "Column must be widened to bigint before adding new FK.")
+        self.assertLess(add_fk_idx, set_not_null_idx, "FK must be created before setting NOT NULL.")
+
+        # Verify schema-specificity:
+        # All information_schema queries must filter by CURRENT_SCHEMA
+        info_schema_queries = [sql for sql in executed_sqls if 'information_schema.columns' in sql.lower()]
+        for query in info_schema_queries:
+            self.assertIn("table_schema = CURRENT_SCHEMA", query)
+
+        # All pg_constraint queries must filter by CURRENT_SCHEMA
+        pg_constraint_queries = [sql for sql in executed_sqls if 'pg_constraint' in sql.lower()]
+        for query in pg_constraint_queries:
+            self.assertIn("CURRENT_SCHEMA", query)
+            self.assertTrue("nspname = CURRENT_SCHEMA" in query)
+
+    def test_pg_verification_fails_if_fk_not_in_catalog(self):
+        """Migration raises RuntimeError if catalog verification fails after ADD CONSTRAINT."""
+        class MockFailingVerificationCursor:
+            def __init__(self):
+                self.executed = []
+
+            def execute(self, sql, params=None):
+                self.executed.append(sql.strip())
+
+            def fetchone(self):
+                last_sql = self.executed[-1].upper() if self.executed else ""
+                if "COUNT(*)" in last_sql:
+                    return (0,)
+                if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
+                    return ('bigint', 'NO')
+                return None
+
+            def fetchall(self):
+                last_sql = self.executed[-1].upper() if self.executed else ""
+                if "FROM PG_CONSTRAINT" in last_sql:
+                    # Catalog returns empty even after ADD CONSTRAINT
+                    return []
+                return []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        mock_conn = SimpleNamespace(
+            cursor=lambda: MockFailingVerificationCursor(),
+            vendor='postgresql',
+            introspection=SimpleNamespace(
+                table_names=lambda c: ['core_idcardtable', 'core_client'],
+                get_table_description=lambda c, t: [
+                    SimpleNamespace(name='id'),
+                    SimpleNamespace(name='name'),
+                    SimpleNamespace(name='client_id'),
+                    SimpleNamespace(name='deleted_by_client'),
+                ]
+            )
+        )
+        schema_editor = SimpleNamespace(connection=mock_conn)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            reconcile_idcardtable_client_id(None, schema_editor)
+
+        self.assertIn("Foreign key verification failed", str(ctx.exception))
 
 
 class Migration0110SafetyGuardTests(TestCase):
@@ -1013,7 +1225,8 @@ class Migration0110PostgresIntegrationTests(TestCase):
                     id bigserial PRIMARY KEY,
                     name varchar(255) NOT NULL,
                     client_id integer NULL,
-                    organisation_id integer NULL
+                    organisation_id integer NULL,
+                    deleted_by_client bool NOT NULL DEFAULT FALSE
                 );
                 INSERT INTO core_client (id, name) VALUES (1, 'Test Org');
                 INSERT INTO core_idcardtable (id, name, client_id) VALUES (10, 'Card Table 1', 1);
@@ -1047,6 +1260,7 @@ class Migration0110PostgresIntegrationTests(TestCase):
                             SimpleNamespace(name='name'),
                             SimpleNamespace(name='client_id'),
                             SimpleNamespace(name='organisation_id'),
+                            SimpleNamespace(name='deleted_by_client'),
                         ]
                     )
                 )
@@ -1070,10 +1284,20 @@ class Migration0110PostgresIntegrationTests(TestCase):
                     ref_a.attname AS ref_col
                 FROM pg_constraint c
                 JOIN pg_class src_t ON c.conrelid = src_t.oid
+                JOIN pg_namespace src_ns ON src_t.relnamespace = src_ns.oid
                 JOIN pg_class ref_t ON c.confrelid = ref_t.oid
+                JOIN pg_namespace ref_ns ON ref_t.relnamespace = ref_ns.oid
                 JOIN pg_attribute src_a ON src_a.attrelid = src_t.oid AND src_a.attnum = c.conkey[1]
                 JOIN pg_attribute ref_a ON ref_a.attrelid = ref_t.oid AND ref_a.attnum = c.confkey[1]
-                WHERE c.contype = 'f' AND src_t.relname = 'core_idcardtable';
+                WHERE c.contype = 'f'
+                  AND src_ns.nspname = CURRENT_SCHEMA
+                  AND src_t.relname = 'core_idcardtable'
+                  AND src_a.attname = 'client_id'
+                  AND ref_ns.nspname = CURRENT_SCHEMA
+                  AND ref_t.relname = 'core_client'
+                  AND ref_a.attname = 'id'
+                  AND array_length(c.conkey, 1) = 1
+                  AND array_length(c.confkey, 1) = 1;
             """)
             fks_after = cur.fetchall()
             self.assertEqual(len(fks_after), 1)
@@ -1084,11 +1308,13 @@ class Migration0110PostgresIntegrationTests(TestCase):
             self.assertEqual(ref_table, 'core_client')
             self.assertEqual(ref_col, 'id')
 
-            # Check column type & nullability
+            # Check column type & nullability using CURRENT_SCHEMA
             cur.execute("""
                 SELECT data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_name = 'core_idcardtable' AND column_name = 'client_id';
+                WHERE table_schema = CURRENT_SCHEMA
+                  AND table_name = 'core_idcardtable'
+                  AND column_name = 'client_id';
             """)
             data_type, is_nullable = cur.fetchone()
             self.assertEqual(data_type.lower(), 'bigint')
