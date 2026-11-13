@@ -202,16 +202,26 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 
 ### `backend/core/test_migration_0110.py`
 - **Location**: Entire file
-- **Action**: Dedicated unit and integration test suite covering:
-  1. NULL rows successfully backfilled from `organisation_id`.
-  2. NULL rows successfully backfilled from `group_id`.
-  3. Non-overwriting of existing valid `client_id`.
-  4. Migration fails fast with clear remediation instructions when NULL rows have no valid source.
-  5. Migration fails fast with clear remediation instructions when orphan references exist.
-  6. Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
-  7. Migration re-runs safely and succeeds after administrator data remediation (idempotent).
-  8. SQLite existing-table path compatibility.
-  9. PostgreSQL exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation.
+- **Action**: Dedicated unit and integration test suite with non-destructive, zero-credential safety guards:
+  1. **Strict Opt-In Execution**: PostgreSQL integration tests are disabled by default via `RUN_PG_MIGRATION_INTEGRATION_TESTS=1`. Without this explicit flag, integration tests cleanly skip without attempting any network connection.
+  2. **Zero Hardcoded Credentials**: Removed all default fallback passwords, hosts, and ports. Tests strictly require explicit environment variables (`PG_TEST_HOST`, `PG_TEST_PORT`, `PG_TEST_USER`, `PG_TEST_PASSWORD`).
+  3. **Non-Destructive Database Handling**:
+     - Generates a unique, randomized temporary database name per run: `test_mig0110_<uuid>`.
+     - Validates that target database name begins with `test_` and rejects protected database names (`propanel_db`, `cardflow_db`, `production`, etc.) and protected usernames (`propanel_user`, `cardflow_user`).
+     - Refuses to drop or terminate connections to pre-existing databases; if the database already exists, raises a `RuntimeError` immediately before any queries run.
+     - Tracks whether the test run itself successfully created the database; cleanup only drops the exact database created, executed inside a strict `finally` block.
+     - If database creation fails, cleanup stops without attempting to drop anything.
+  4. **Isolated SQLite Unit Tests (Zero Credentials)**: 8 fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
+     - NULL rows successfully backfilled from `organisation_id`.
+     - NULL rows successfully backfilled from `group_id`.
+     - Non-overwriting of existing valid `client_id`.
+     - Migration fails fast with clear remediation instructions when NULL rows have no valid source.
+     - Migration fails fast with clear remediation instructions when orphan references exist.
+     - Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
+     - Migration re-runs safely and succeeds after administrator data remediation (idempotent).
+     - SQLite existing-table path compatibility.
+  5. **Safety Guard Tests (7 tests)**: Verifies default skip behavior, missing credential rejection, production DB/user protection, refusal to overwrite pre-existing databases, and refusal to drop uncreated databases.
+  6. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on a live temporary PostgreSQL database.
 
 ### `backend/core/migrations/0108_add_org_role_to_organisation.py`
 - **Status**: Verified idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`. Safe for databases where `org_role` already exists.
@@ -227,7 +237,8 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 | **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
 | **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
 | **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
-| **Migration 0110 Comprehensive Tests (`pytest core/test_migration_0110.py`)** | **PASS** | 9 passed in 2.71s (covers NULL backfill, no valid source failure, orphan failure, ambiguous ownership, remediation re-run, SQLite path, and PostgreSQL FK replacement). |
+| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **15 passed, 1 skipped in 0.22s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
+| **Opt-In Integration Test (`RUN_PG_MIGRATION_INTEGRATION_TESTS=1`)** | **PASS** | **1 passed in 3.33s**. Temporary `test_mig0110_<uuid>` DB created, tested, verified CASCADE FK & bigint NOT NULL, and safely dropped. |
 | **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
 | **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
 | **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 62.83s. |
