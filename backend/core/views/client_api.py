@@ -102,20 +102,6 @@ def _parse_client_id(raw_client_id):
     return client_id if client_id > 0 else None
 
 
-def _get_admin_manageable_client_staff(user, staff_id):
-    staff_obj = (
-        Staff.objects
-        .filter(id=staff_id, staff_type='assistant')
-        .select_related('user', 'client')
-        .first()
-    )
-    if not staff_obj:
-        return None, JsonResponse({'success': False, 'message': 'Staff not found'}, status=404)
-    if not _check_admin_staff_client_access(user, staff_obj.client_id):
-        return None, JsonResponse({'success': False, 'message': 'Access denied. You are not assigned to this client.'}, status=403)
-    return staff_obj, None
-
-
 def _serialize_client_message(item):
     sent_by_user = item.sent_by
     if sent_by_user:

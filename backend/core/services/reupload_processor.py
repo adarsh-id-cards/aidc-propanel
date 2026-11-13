@@ -437,7 +437,7 @@ def process_reupload_images(task):
                                 pending_media_deletes.append((card.pk, img_field))
                             pending_media_creates.append({
                                 'card': card,
-                                'client': Organisation,
+                                'client': client,
                                 'saved_path': saved_path,
                                 'field_name': img_field,
                             })

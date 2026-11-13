@@ -16,12 +16,23 @@ __pycache__/
 *$py.class
 *.sqlite3
 test_db.sqlite3
+pytest_db_*.sqlite3
+clean_test_db*.sqlite3
+deployment_sim_db.sqlite3
 
 # Logs & Caches
 *.log
 logs/
 .pytest_cache/
 .benchmarks/
+scratch/
+backend/scratch/
+*.dump
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
 
 # Media Uploads & Collected Staticfiles
 media/

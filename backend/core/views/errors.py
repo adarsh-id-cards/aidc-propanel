@@ -4,6 +4,7 @@ import logging
 import re
 from django.shortcuts import render, redirect
 from django.conf import settings as django_settings
+from core.services.permission_service import PermissionService
 
 logger = logging.getLogger(__name__)
 

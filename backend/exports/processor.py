@@ -372,7 +372,8 @@ def process_export_pdf(task):
         )
 
         if not result.success and str(result.message).strip().lower() == 'export cancelled':
-            if 'pdf_path' in locals():
+            pdf_path = locals().get('pdf_path')
+            if pdf_path:
                 _safe_remove(pdf_path, 'cancelled PDF')
             return
         
@@ -519,7 +520,8 @@ def process_export_docx(task):
         )
 
         if not result.success and str(result.message).strip().lower() == 'export cancelled':
-            if 'docx_path' in locals():
+            docx_path = locals().get('docx_path')
+            if docx_path:
                 _safe_remove(docx_path, 'cancelled DOCX')
             return
         
@@ -655,7 +657,8 @@ def process_export_excel(task):
         )
 
         if not result.success and str(result.message).strip().lower() == 'export cancelled':
-            if 'excel_path' in locals():
+            excel_path = locals().get('excel_path')
+            if excel_path:
                 _safe_remove(excel_path, 'cancelled Excel')
             return
         

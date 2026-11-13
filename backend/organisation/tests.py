@@ -71,7 +71,6 @@ class ClientAccessControlTests(TestCase):
     def test_client_dashboard_accessible(self):
         self.client.login(username='access@test.com', password='pass1234')
         response = self.client.get('/organisations/api/dashboard/')
-        print("DEBUG RESPONSE:", response.status_code, response.content)
         self.assertIn(response.status_code, [200, 302])
 
     def test_non_client_blocked_from_client_dashboard(self):

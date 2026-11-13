@@ -2461,7 +2461,7 @@ def api_table_status_counts(request, table_id):
     try:
         table = _tbl  # Reuse already-fetched table from scope check
         if PermissionService.is_client_staff(request.user):
-            from django.db.models import Count
+            from django.db.models import Count, Q
             scoped_cards_qs = _apply_client_staff_row_scope(
                 IDCard.objects.filter(table=table),
                 request.user,
@@ -2506,8 +2506,8 @@ def api_table_status_counts(request, table_id):
                 )
                 rp_req_cnt = req_counts['req_c'] or 0
                 rp_conf_cnt = req_counts['conf_c'] or 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Reprint count aggregation skipped or failed: %s", e)
 
             status_counts['request'] = rp_req_cnt
             status_counts['requested'] = rp_req_cnt

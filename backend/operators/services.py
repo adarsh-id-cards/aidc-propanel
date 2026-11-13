@@ -25,6 +25,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.db.models import QuerySet, Count, Q
+from django.http import JsonResponse
 
 from core.models import User
 from organisation.models import Organisation

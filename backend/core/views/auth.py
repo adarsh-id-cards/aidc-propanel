@@ -200,18 +200,17 @@ api_auth_logout = _csrf_exempt(api_auth_logout)
 
 
 __all__ = [
-    'login_view',
     'logout_view',
     'api_check_email',
     'api_login',
+    'api_pin_status',
+    'api_login_pin',
+    'api_create_pin',
     'api_auth_me',
     'api_auth_logout',
     'api_forgot_password',
     'api_verify_otp',
     'api_reset_password',
-    'admin_staff_dashboard',
-    'client_dashboard',
-    'client_staff_dashboard',
     'inactive_view',
     'maintenance_view',
     'api_check_maintenance',

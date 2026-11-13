@@ -1207,7 +1207,7 @@ def client_api_create_table_from_xlsx(request):
     Auto-detects the client's default group, then delegates to the core view.
     """
     user = request.user
-    client = _get_client_for_request(user)
+    client = OrganisationAccessService.get_organisation_for_user(user)
     if not client:
         return JsonResponse({'success': False, 'message': 'Client not found.'}, status=403)
 

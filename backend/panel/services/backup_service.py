@@ -42,6 +42,16 @@ def _ensure_backup_dir(task_id: int):
     return d
 
 
+def _human_size(bytes_val: int) -> str:
+    """Format byte size into human readable string."""
+    val = float(bytes_val or 0)
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if abs(val) < 1024.0:
+            return f"{val:3.1f} {unit}"
+        val /= 1024.0
+    return f"{val:.1f} TB"
+
+
 # ─── Public API ───────────────────────────────────────────────────────────
 
 def start_backup(task_id: int):

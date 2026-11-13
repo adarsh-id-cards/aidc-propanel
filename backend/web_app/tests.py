@@ -52,7 +52,6 @@ class WebAppApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data['success'])
-        print("DEBUG CLIENTS:", data['clients'])
         self.assertGreaterEqual(len(data['clients']), 2)
 
         # Check clients details

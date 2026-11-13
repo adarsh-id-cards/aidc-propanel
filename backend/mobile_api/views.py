@@ -44,6 +44,12 @@ from mediafiles.utils import get_card_photo_url
 from tables.models import IDCard, Table
 from organisation.models import Organisation
 
+import os
+
+Client = Organisation
+PortfolioCategory = None
+PortfolioItemService = None
+
 from staff.models import Staff
 
 
@@ -4925,7 +4931,7 @@ def api_client_toggle(request, client_id):
             client.status = 'active'
             label = 'activated'
         client.save(update_fields=['status'])
-        return JsonResponse({'success': True, 'message': f'{client.name} {label}', 'new_status': Organisation.status})
+        return JsonResponse({'success': True, 'message': f'{client.name} {label}', 'new_status': client.status})
     except Exception as exc:
         logger.exception('api_client_toggle error: %s', exc)
         return JsonResponse({'success': False, 'message': 'An error occurred. Please try again.'}, status=500)
