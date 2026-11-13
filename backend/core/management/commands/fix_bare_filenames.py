@@ -46,9 +46,9 @@ class Command(BaseCommand):
         batch_size = int(options.get("batch_size") or 500)
         client_id = int(options.get("client_id") or 0)
 
-        qs = IDCard.objects.select_related("table__group__client").all().order_by("id")
+        qs = IDCard.objects.select_related("table__organisation").all().order_by("id")
         if client_id:
-            qs = qs.filter(table__group__client__id=client_id)
+            qs = qs.filter(table__organisation_id=client_id)
         if limit:
             qs = qs[:limit]
 

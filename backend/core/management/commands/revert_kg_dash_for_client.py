@@ -97,7 +97,7 @@ class Command(BaseCommand):
 
         cards_qs = (
             IDCard.objects
-            .filter(table__group__client=client, table_id__in=table_class_field.keys())
+            .filter(table__organisation=client, table_id__in=table_class_field.keys())
             .only("id", "table_id", "field_data")
         )
         total_cards = cards_qs.count()

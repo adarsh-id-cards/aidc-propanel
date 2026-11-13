@@ -85,7 +85,7 @@ class Command(BaseCommand):
         if table_id:
             qs = qs.filter(id=table_id)
         if client_id:
-            qs = qs.filter(group__client_id=client_id)
+            qs = qs.filter(organisation_id=client_id)
 
         mode = 'APPLY' if apply else 'DRY-RUN'
         self.stdout.write(f'\n=== restore_renamed_relation_photo_fields ({mode}) ===\n')

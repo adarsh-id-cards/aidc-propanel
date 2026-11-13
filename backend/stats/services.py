@@ -171,9 +171,9 @@ class StatsService:
                 return om.organisation.name
 
             from assistants.models import Assistant
-            ast = Assistant.objects.filter(user_id=user.id).select_related('client').first()
-            if ast and ast.client:
-                return ast.client.name
+            ast = Assistant.objects.filter(user_id=user.id).select_related('organisation').first()
+            if ast and ast.organisation:
+                return ast.organisation.name
 
             from staff.models import Staff
             st = Staff.objects.filter(user_id=user.id).select_related('client').first()

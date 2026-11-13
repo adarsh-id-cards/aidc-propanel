@@ -52,7 +52,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Selected Client: {client.name}"))
 
         # 2. Get Table
-        tables = Table.objects.filter(group__client=client)
+        tables = Table.objects.filter(organisation=client)
         if not tables.exists():
             self.stdout.write(self.style.ERROR(f"No ID Card Tables found for client '{client.name}'"))
             return

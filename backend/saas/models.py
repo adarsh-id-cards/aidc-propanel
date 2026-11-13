@@ -362,7 +362,8 @@ class SaaSCardTopupRequest(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name='saas_card_topup_requests',
     )
     quantity = models.PositiveIntegerField(choices=QUANTITY_CHOICES)
     amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
@@ -418,7 +419,8 @@ class SaaSAddonRequest(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name='saas_addon_requests',
     )
     addon_type = models.CharField(max_length=30, choices=ADDON_CHOICES)
     request_type = models.CharField(max_length=30, choices=REQUEST_TYPE_CHOICES, default='annual_access')

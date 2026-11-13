@@ -92,7 +92,7 @@ class Command(BaseCommand):
             f"Client: {client.name} (ID: {client.id})"
         )
 
-        qs = IDCard.objects.select_related("table").filter(table__group__client_id=client.id)
+        qs = IDCard.objects.select_related("table").filter(table__organisation_id=client.id)
         if table_id:
             qs = qs.filter(table_id=table_id)
 

@@ -204,7 +204,7 @@ class Command(BaseCommand):
         return client
 
     def _resolve_table(self, client, table_id, table_name, auto_yes):
-        tables_qs = Table.objects.filter(group__client=client).order_by('name', 'id')
+        tables_qs = Table.objects.filter(organisation=client).order_by('name', 'id')
         if table_id:
             tables_qs = tables_qs.filter(id=table_id)
         if table_name:

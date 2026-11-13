@@ -137,7 +137,7 @@ class Operation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'core_operation'
+        db_table = 'operations_operation'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['organisation', 'status']),
@@ -179,7 +179,7 @@ class OperationChange(models.Model):
         related_name='changes',
         db_index=True,
     )
-    target_id = models.IntegerField(
+    target_id = models.BigIntegerField(
         db_index=True,
         help_text='Target entity PK (e.g. card_id, table_id)',
     )
@@ -227,7 +227,7 @@ class OperationChange(models.Model):
     )
 
     class Meta:
-        db_table = 'core_operationchange'
+        db_table = 'operations_operationchange'
         ordering = ['id']
         indexes = [
             models.Index(fields=['operation', 'target_id']),
@@ -379,7 +379,7 @@ class BulkTransaction(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'core_bulktransaction'
+        db_table = 'operations_bulktransaction'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['organisation', 'created_at']),
@@ -489,7 +489,7 @@ class AuditEvent(models.Model):
         default='card',
         db_index=True,
     )
-    target_id = models.IntegerField(
+    target_id = models.BigIntegerField(
         db_index=True,
         help_text='Target entity PK (card_id, table_id, etc.)',
     )
@@ -556,7 +556,7 @@ class AuditEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        db_table = 'core_auditevent'
+        db_table = 'operations_auditevent'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['organisation', 'created_at']),

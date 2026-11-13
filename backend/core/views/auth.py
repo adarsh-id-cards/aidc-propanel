@@ -117,10 +117,10 @@ def api_auth_me(request):
     elif role == 'assistant':
         try:
             from assistants.models import Assistant
-            ast = Assistant.objects.filter(user=user).select_related('client').first()
-            if ast and ast.client:
-                org_id = ast.client.id
-                org_name = ast.client.name
+            ast = Assistant.objects.filter(user=user).select_related('organisation').first()
+            if ast and ast.organisation:
+                org_id = ast.organisation.id
+                org_name = ast.organisation.name
         except Exception:
             pass
 

@@ -586,87 +586,82 @@ def api_recent_client_updates(request):
         first_table_map = {}
 
         if client_ids:
-            placeholders = ','.join(['%s'] * len(client_ids))
-            sql = (
-                'SELECT '
-                '  t.id AS table_id, '
-                '  t.name AS table_name, '
-                '  COALESCE(t.organisation_id, t.client_id) AS client_id, '
-                '  COALESCE(SUM(CASE WHEN c.status = %s THEN 1 ELSE 0 END), 0) AS pending, '
-                '  COALESCE(SUM(CASE WHEN c.status = %s THEN 1 ELSE 0 END), 0) AS verified, '
-                '  COALESCE(SUM(CASE WHEN c.status = %s THEN 1 ELSE 0 END), 0) AS approved, '
-                '  COALESCE(SUM(CASE WHEN c.status IN (%s, %s) THEN 1 ELSE 0 END), 0) AS downloaded, '
-                '  COALESCE(SUM(CASE WHEN c.status IN (%s, %s) THEN 1 ELSE 0 END), 0) AS pool, '
-                '  COALESCE(SUM(CASE WHEN c.status = %s THEN 1 ELSE 0 END), 0) AS reprint '
-                'FROM core_idcardtable t '
-                'LEFT JOIN core_idcard c ON c.table_id = t.id '
-                f'WHERE COALESCE(t.organisation_id, t.client_id) IN ({placeholders}) '
-                'GROUP BY t.id, t.name, COALESCE(t.organisation_id, t.client_id) '
-                'ORDER BY t.id ASC'
+            table_rows = (
+                Table.objects.filter(organisation_id__in=client_ids)
+                .annotate(
+                    pending=Count('id_cards', filter=Q(id_cards__status='pending')),
+                    verified=Count('id_cards', filter=Q(id_cards__status='verified')),
+                    approved=Count('id_cards', filter=Q(id_cards__status='approved')),
+                    downloaded=Count('id_cards', filter=Q(id_cards__status__in=['download', 'printed'])),
+                    pool=Count('id_cards', filter=Q(id_cards__status__in=['pool', 'deleted'])),
+                    reprint=Count('id_cards', filter=Q(id_cards__status='reprint')),
+                )
+                .values_list(
+                    'id', 'name', 'organisation_id',
+                    'pending', 'verified', 'approved', 'downloaded', 'pool', 'reprint',
+                )
+                .order_by('id')
             )
-            sql_params = ['pending', 'verified', 'approved', 'download', 'printed', 'pool', 'deleted', 'reprint', *client_ids]
 
-            with connection.cursor() as cursor:
-                cursor.execute(sql, sql_params)
-                for table_id, table_name, client_id, pending, verified, approved, downloaded, pool, reprint in cursor.fetchall():
-                    cid = int(client_id)
-                    p = int(pending or 0)
-                    v = int(verified or 0)
-                    a = int(approved or 0)
-                    d = int(downloaded or 0)
-                    pl = int(pool or 0)
-                    rp = int(reprint or 0)
-                    tot = p + v + a + d + pl + rp
+            for table_id, table_name, client_id, pending, verified, approved, downloaded, pool, reprint in table_rows:
+                cid = int(client_id)
+                p = int(pending or 0)
+                v = int(verified or 0)
+                a = int(approved or 0)
+                d = int(downloaded or 0)
+                pl = int(pool or 0)
+                rp = int(reprint or 0)
+                tot = p + v + a + d + pl + rp
 
-                    table_payload = {
-                        'id': int(table_id),
-                        'name': table_name,
-                        'pending': p,
-                        'verified': v,
-                        'approved': a,
-                        'download': d,
-                        'downloaded': d,
-                        'printed': d,
-                        'pool': pl,
-                        'deleted': pl,
-                        'reprint': rp,
-                        'total': tot,
-                        'total_cards': tot,
+                table_payload = {
+                    'id': int(table_id),
+                    'name': table_name,
+                    'pending': p,
+                    'verified': v,
+                    'approved': a,
+                    'download': d,
+                    'downloaded': d,
+                    'printed': d,
+                    'pool': pl,
+                    'deleted': pl,
+                    'reprint': rp,
+                    'total': tot,
+                    'total_cards': tot,
+                }
+
+                if cid not in tables_map:
+                    tables_map[cid] = []
+                tables_map[cid].append(table_payload)
+
+                if cid not in client_counts_map:
+                    client_counts_map[cid] = {
+                        'pending': 0,
+                        'verified': 0,
+                        'approved': 0,
+                        'download': 0,
+                        'downloaded': 0,
+                        'printed': 0,
+                        'pool': 0,
+                        'deleted': 0,
+                        'reprint': 0,
+                        'total': 0,
+                        'total_cards': 0,
                     }
+                client_counts_map[cid]['pending'] += p
+                client_counts_map[cid]['verified'] += v
+                client_counts_map[cid]['approved'] += a
+                client_counts_map[cid]['download'] += d
+                client_counts_map[cid]['downloaded'] += d
+                client_counts_map[cid]['printed'] += d
+                client_counts_map[cid]['pool'] += pl
+                client_counts_map[cid]['deleted'] += pl
+                client_counts_map[cid]['reprint'] += rp
+                client_counts_map[cid]['total'] += tot
+                client_counts_map[cid]['total_cards'] += tot
 
-                    if cid not in tables_map:
-                        tables_map[cid] = []
-                    tables_map[cid].append(table_payload)
-
-                    if cid not in client_counts_map:
-                        client_counts_map[cid] = {
-                            'pending': 0,
-                            'verified': 0,
-                            'approved': 0,
-                            'download': 0,
-                            'downloaded': 0,
-                            'printed': 0,
-                            'pool': 0,
-                            'deleted': 0,
-                            'reprint': 0,
-                            'total': 0,
-                            'total_cards': 0,
-                        }
-                    client_counts_map[cid]['pending'] += p
-                    client_counts_map[cid]['verified'] += v
-                    client_counts_map[cid]['approved'] += a
-                    client_counts_map[cid]['download'] += d
-                    client_counts_map[cid]['downloaded'] += d
-                    client_counts_map[cid]['printed'] += d
-                    client_counts_map[cid]['pool'] += pl
-                    client_counts_map[cid]['deleted'] += pl
-                    client_counts_map[cid]['reprint'] += rp
-                    client_counts_map[cid]['total'] += tot
-                    client_counts_map[cid]['total_cards'] += tot
-
-                    current_first = first_table_map.get(cid)
-                    if current_first is None or int(table_id) < current_first:
-                        first_table_map[cid] = int(table_id)
+                current_first = first_table_map.get(cid)
+                if current_first is None or int(table_id) < current_first:
+                    first_table_map[cid] = int(table_id)
 
         results = []
         for client in clients:

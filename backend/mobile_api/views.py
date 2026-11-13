@@ -1471,7 +1471,7 @@ def api_upload_photo(request, table_id):
 
     try:
         card_id_int = int(str(card_id).strip())
-        card = IDCard.objects.select_related('table__group').get(id=card_id_int, table_id=table_id)
+        card = IDCard.objects.select_related('table__organisation').get(id=card_id_int, table_id=table_id)
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'message': 'Invalid card_id'}, status=400)
     except IDCard.DoesNotExist:
@@ -2294,7 +2294,7 @@ def api_card_update(request, table_id, card_id):
     """Update an existing card."""
     from core.services import IDCardService
     try:
-        card = get_object_or_404(IDCard.objects.select_related('table__group'), id=card_id, table_id=table_id)
+        card = get_object_or_404(IDCard.objects.select_related('table__organisation'), id=card_id, table_id=table_id)
         is_assistant_pool_retrieve = (
             PermissionService.is_client_staff(request.user)
             and card.status == 'pool'
@@ -2433,7 +2433,7 @@ def api_client_groups_detail(request, client_id):
     from organisation.models import Organisation
     from tables.models import Table
     get_object_or_404(Client, id=client_id)
-    groups = Table.objects.filter(client_id=client_id).order_by('name')
+    groups = Table.objects.filter(organisation_id=client_id).order_by('name')
     tables_qs = (
         Table.objects
         .filter(organisation_id=client_id, is_active=True)
@@ -2523,9 +2523,9 @@ def api_group_create(request, client_id):
     name = str(data.get('name', '') or '').strip()
     if not name:
         return JsonResponse({'success': False, 'message': 'Group name is required'}, status=400)
-    if Table.objects.filter(client=target_client, name__iexact=name).exists():
+    if Table.objects.filter(organisation=target_client, name__iexact=name).exists():
         return JsonResponse({'success': False, 'message': f'A group named "{name}" already exists'}, status=400)
-    group = Table.objects.create(client=target_client, name=name)
+    group = Table.objects.create(organisation=target_client, name=name)
     ActivityService.log('group_create', f'Group "{name}" created', request=request, target_model='Table', target_id=group.pk, target_name=name)
     return JsonResponse({'success': True, 'message': f'Group "{name}" created', 'group': {'id': group.id, 'name': group.name, 'table_count': 0, 'total_cards': 0, 'tables': []}})
 
@@ -2549,7 +2549,7 @@ def api_group_update(request, group_id):
     name = str(data.get('name', '') or '').strip()
     if not name:
         return JsonResponse({'success': False, 'message': 'Group name is required'}, status=400)
-    if Table.objects.filter(client_id=group.client_id, name__iexact=name).exclude(id=group_id).exists():
+    if Table.objects.filter(organisation_id=group.organisation_id, name__iexact=name).exclude(id=group_id).exists():
         return JsonResponse({'success': False, 'message': f'A group named "{name}" already exists'}, status=400)
     old_name = group.name
     group.name = name
@@ -2812,7 +2812,7 @@ def api_table_update_fields(request, table_id):
 def api_card_delete(request, card_id):
     """Delete a single card (move to pool or permanently delete)."""
     try:
-        card = get_object_or_404(IDCard.objects.select_related('table__group'), id=card_id)
+        card = get_object_or_404(IDCard.objects.select_related('table__organisation'), id=card_id)
         user = request.user
         if not _can_access_card_with_row_scope(user, card):
             return JsonResponse({'success': False, 'message': 'Access denied'}, status=403)
@@ -3466,7 +3466,7 @@ def api_mobile_staff_assignment_update(request, staff_id):
             if req_id_source in ('group', 'table'):
                 id_source = req_id_source
             else:
-                group_count = Table.objects.filter(client_id=client_id).count()
+                group_count = Table.objects.filter(organisation_id=client_id).count()
                 id_source = 'table' if group_count <= 1 else 'group'
                 if target_client and getattr(target_client, 'assignment_id_source', '') == 'table':
                     id_source = 'table'

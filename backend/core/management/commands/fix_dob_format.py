@@ -89,7 +89,7 @@ class Command(BaseCommand):
 
         qs_base = IDCard.objects.exclude(field_data__isnull=True)
         if client_id:
-            qs_base = qs_base.filter(table__group__client_id=client_id)
+            qs_base = qs_base.filter(table__organisation_id=client_id)
             self.stdout.write(f'Filtering to client_id={client_id}\n')
 
         # --diagnose: show all DOB-like keys present, and any remaining digit-only values

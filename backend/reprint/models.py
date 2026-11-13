@@ -52,6 +52,29 @@ class ReprintRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def __init__(self, *args, **kwargs):
+        if 'group' in kwargs:
+            kwargs.setdefault('table', kwargs.pop('group'))
+        if 'group_id' in kwargs:
+            kwargs.setdefault('table_id', kwargs.pop('group_id'))
+        super().__init__(*args, **kwargs)
+
+    @property
+    def group(self):
+        return self.table
+
+    @group.setter
+    def group(self, value):
+        self.table = value
+
+    @property
+    def group_id(self):
+        return self.table_id
+
+    @group_id.setter
+    def group_id(self, value):
+        self.table_id = value
+
     def __str__(self):
         return f"Reprint #{self.id} (Card #{self.card_id}, #{self.reprint_number}x) — {self.status}"
 
@@ -60,13 +83,12 @@ class ReprintRequest(models.Model):
         return bool(self.changes and isinstance(self.changes, dict))
 
     class Meta:
-        app_label = 'core'
-        db_table = 'core_reprintrequest'
+        app_label = 'reprint'
+        db_table = 'reprint_reprintrequest'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['table', 'status']),
-            models.Index(fields=['table', 'status', '-created_at']),
-            models.Index(fields=['card']),
-            models.Index(fields=['card', 'status']),
-            models.Index(fields=['created_at']),
+            models.Index(fields=['table', 'status'], name='reprint_tbl_status_idx'),
+            models.Index(fields=['table', 'status', '-created_at'], name='reprint_tbl_st_time_idx'),
+            models.Index(fields=['card', 'status'], name='reprint_card_status_idx'),
+            models.Index(fields=['created_at'], name='reprint_created_at_idx'),
         ]

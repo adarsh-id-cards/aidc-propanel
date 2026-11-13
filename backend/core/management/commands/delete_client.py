@@ -59,7 +59,7 @@ class Command(BaseCommand):
         total_tables = client.groups.count() if hasattr(client, 'groups') else 0 # Assuming related name 'groups' or similar
         # Wait, let's just count from IDCard
         from tables.models import IDCard
-        total_cards = IDCard.objects.filter(table__group__client=client).count()
+        total_cards = IDCard.objects.filter(table__organisation=client).count()
         
         self.stdout.write(f"This client has approximately {total_cards} ID Cards.")
 
@@ -84,7 +84,7 @@ class Command(BaseCommand):
                         
                 if 'cardprint_printrequest' in tables:
                     from tables.models import IDCard
-                    card_ids = list(IDCard.objects.filter(table__group__client=client).values_list('id', flat=True))
+                    card_ids = list(IDCard.objects.filter(table__organisation=client).values_list('id', flat=True))
                     if card_ids:
                         with connection.cursor() as cursor:
                             batch_size = 500

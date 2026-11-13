@@ -93,7 +93,7 @@ class CardMedia(models.Model):
         help_text='Associated Table (for template images)'
     )
     client = models.ForeignKey(
-        'core.Organisation',
+        'organisation.Organisation',
         on_delete=models.CASCADE,
         related_name='media_files',
         help_text='Organisation owner for data scoping'
@@ -192,7 +192,6 @@ class CardMedia(models.Model):
             models.Index(fields=['card', 'field_name']),
             models.Index(fields=['card', 'field_name', 'status']),
             models.Index(fields=['root_token', 'version']),
-            models.Index(fields=['original_filename']),
             models.Index(fields=['file'], name='mediafiles__file_dbc7f5_idx'),
             models.Index(fields=['created_at']),
             models.Index(fields=['created_at', 'status']),

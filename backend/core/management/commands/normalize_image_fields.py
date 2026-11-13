@@ -77,10 +77,10 @@ class Command(BaseCommand):
 
         try:
             # Build queryset
-            cards_query = IDCard.objects.select_related('table__group__client')
+            cards_query = IDCard.objects.select_related('table__organisation')
 
             if client_id:
-                cards_query = cards_query.filter(table__group__client_id=client_id)
+                cards_query = cards_query.filter(table__organisation_id=client_id)
                 self.stdout.write(f'Filtering to client_id={client_id}')
 
             total = cards_query.count()

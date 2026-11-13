@@ -65,7 +65,6 @@ class Table(models.Model):
         Organisation,
         on_delete=models.CASCADE,
         related_name='tables',
-        db_column='client_id',
     )
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True, null=True)
@@ -83,7 +82,6 @@ class Table(models.Model):
     is_active = models.BooleanField(default=True)
     deleted_by_manager = models.BooleanField(
         default=False,
-        db_column='deleted_by_client',
         help_text='True when the prime manager soft-deletes this table.',
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -91,10 +89,14 @@ class Table(models.Model):
 
     def __init__(self, *args, **kwargs):
         if 'client' in kwargs:
-            kwargs['organisation'] = kwargs.pop('client')
+            kwargs.setdefault('organisation', kwargs.pop('client'))
+        if 'client_id' in kwargs:
+            kwargs.setdefault('organisation_id', kwargs.pop('client_id'))
+        if 'deleted_by_client' in kwargs:
+            kwargs.setdefault('deleted_by_manager', kwargs.pop('deleted_by_client'))
         if 'group' in kwargs:
             group_val = kwargs.pop('group')
-            if 'organisation' not in kwargs:
+            if 'organisation' not in kwargs and 'organisation_id' not in kwargs:
                 kwargs['organisation'] = getattr(group_val, 'organisation', getattr(group_val, 'client', group_val))
         super().__init__(*args, **kwargs)
 
@@ -183,6 +185,18 @@ class Table(models.Model):
         if len(self.fields) > 20:
             from django.core.exceptions import ValidationError
             raise ValidationError('Maximum 20 fields allowed per table.')
+        if 'update_fields' in kwargs and kwargs['update_fields'] is not None:
+            mapped_fields = []
+            for f in kwargs['update_fields']:
+                if f == 'deleted_by_client':
+                    mapped_fields.append('deleted_by_manager')
+                elif f == 'client':
+                    mapped_fields.append('organisation')
+                elif f == 'client_id':
+                    mapped_fields.append('organisation_id')
+                else:
+                    mapped_fields.append(f)
+            kwargs['update_fields'] = mapped_fields
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -191,12 +205,12 @@ class Table(models.Model):
 
     class Meta:
         app_label = 'tables'
-        db_table = 'core_idcardtable'
+        db_table = 'tables_table'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['organisation', 'is_active']),
-            models.Index(fields=['is_active']),
-            models.Index(fields=['created_at']),
+            models.Index(fields=['organisation', 'is_active'], name='tbl_org_active_idx'),
+            models.Index(fields=['is_active'], name='tbl_is_active_idx'),
+            models.Index(fields=['created_at'], name='tbl_created_at_idx'),
             models.Index(fields=['organisation', 'deleted_by_manager', 'is_active'], name='tbl_org_del_act_idx'),
             models.Index(fields=['deleted_by_manager', 'is_active'], name='tbl_del_act_idx'),
         ]
@@ -251,6 +265,13 @@ class IDCard(models.Model):
         table_name = self.table.name if self.table_id else 'Unknown Table'
         return f"{name} — {table_name}"
 
+    def __init__(self, *args, **kwargs):
+        if 'group' in kwargs:
+            kwargs.setdefault('table', kwargs.pop('group'))
+        if 'group_id' in kwargs:
+            kwargs.setdefault('table_id', kwargs.pop('group_id'))
+        super().__init__(*args, **kwargs)
+
     @property
     def organisation(self):
         """Convenience: get the organisation this card belongs to."""
@@ -267,6 +288,18 @@ class IDCard(models.Model):
     def group(self):
         """Legacy compat — returns the Table itself (group level removed)."""
         return self.table
+
+    @group.setter
+    def group(self, value):
+        self.table = value
+
+    @property
+    def group_id(self):
+        return self.table_id
+
+    @group_id.setter
+    def group_id(self, value):
+        self.table_id = value
 
     def delete_images(self):
         """Delete all image files associated with this card (incl. thumbnails)"""
@@ -300,7 +333,7 @@ class IDCard(models.Model):
 
     class Meta:
         app_label = 'tables'
-        db_table = 'core_idcard'
+        db_table = 'tables_idcard'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['table', 'status']),

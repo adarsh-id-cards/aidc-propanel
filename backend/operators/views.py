@@ -391,7 +391,7 @@ def api_client_idcard_groups(request, client_id):
     """
     from tables.models import Table
     
-    groups = Table.objects.filter(client_id=client_id)
+    groups = Table.objects.filter(organisation_id=client_id)
     
     return JsonResponse({
         'success': True,

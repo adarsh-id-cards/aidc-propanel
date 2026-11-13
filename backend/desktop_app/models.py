@@ -7,8 +7,8 @@ from django.utils import timezone
 
 class DesktopAppDevice(models.Model):
     device_name = models.CharField(max_length=120)
-    installation_id = models.CharField(max_length=128, unique=True, db_index=True)
-    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    installation_id = models.CharField(max_length=128, unique=True)
+    token_hash = models.CharField(max_length=64, unique=True)
     token_prefix = models.CharField(max_length=12, db_index=True)
     is_active = models.BooleanField(default=True, db_index=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
@@ -22,8 +22,6 @@ class DesktopAppDevice(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['is_active', 'created_at']),
-            models.Index(fields=['installation_id']),
-            models.Index(fields=['token_prefix']),
         ]
 
     def __str__(self):

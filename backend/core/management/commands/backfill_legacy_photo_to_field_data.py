@@ -84,7 +84,7 @@ class Command(BaseCommand):
             .only("id", "photo", "field_data", "table__id", "table__fields")
         )
         if client_id:
-            qs = qs.filter(table__group__client_id=client_id)
+            qs = qs.filter(table__organisation_id=client_id)
         if table_id:
             qs = qs.filter(table_id=table_id)
 

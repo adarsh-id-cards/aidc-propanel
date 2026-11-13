@@ -18,7 +18,6 @@ class Assistant(models.Model):
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        db_column='client_id',
         related_name='assistants',
     )
     manager = models.ForeignKey(
@@ -32,9 +31,13 @@ class Assistant(models.Model):
 
     def __init__(self, *args, **kwargs):
         if 'client' in kwargs:
-            kwargs['organisation'] = kwargs.pop('client')
+            kwargs.setdefault('organisation', kwargs.pop('client'))
         if 'client_id' in kwargs:
-            kwargs['organisation_id'] = kwargs.pop('client_id')
+            kwargs.setdefault('organisation_id', kwargs.pop('client_id'))
+        if 'perm_idcard_client_list' in kwargs:
+            kwargs.setdefault('perm_organisation_list', kwargs.pop('perm_idcard_client_list'))
+        if 'perm_manage_client_staff' in kwargs:
+            kwargs.setdefault('perm_manage_assistants', kwargs.pop('perm_manage_client_staff'))
         super().__init__(*args, **kwargs)
 
     @property
@@ -126,8 +129,8 @@ class Assistant(models.Model):
     department = models.CharField(max_length=100, blank=True, null=True)
     designation = models.CharField(max_length=100, blank=True, null=True)
 
-    perm_organisation_list = models.BooleanField(default=False, db_column='perm_idcard_client_list')
-    perm_manage_assistants = models.BooleanField(default=False, db_column='perm_manage_client_staff')
+    perm_organisation_list = models.BooleanField(default=False)
+    perm_manage_assistants = models.BooleanField(default=False)
 
     perm_idcard_setting_list = models.BooleanField(default=False)
     perm_idcard_setting_add = models.BooleanField(default=False)

@@ -152,8 +152,8 @@ class Command(BaseCommand):
 
         # ── Scan all cards for this client ───────────────────────────────────
         cards_qs = IDCard.objects.filter(
-            table__group__client=client
-        ).select_related('table__group')
+            table__organisation=client
+        ).select_related('table__organisation')
 
         total_cards = cards_qs.count()
         self.stdout.write(f"Scanning {total_cards} cards...\n")

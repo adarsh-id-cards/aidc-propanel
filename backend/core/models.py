@@ -600,7 +600,7 @@ class ActivityLog(models.Model):
     action = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
     description = models.CharField(max_length=500)
     target_model = models.CharField(max_length=50, blank=True, default='')
-    target_id = models.PositiveIntegerField(null=True, blank=True)
+    target_id = models.PositiveBigIntegerField(null=True, blank=True)
     target_name = models.CharField(max_length=200, blank=True, default='')
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -755,7 +755,7 @@ class ClientMessage(models.Model):
         ('temporary', 'Temporary'),
     ]
 
-    client = models.ForeignKey('core.Organisation', on_delete=models.CASCADE, related_name='org_messages')
+    client = models.ForeignKey('organisation.Organisation', on_delete=models.CASCADE, related_name='org_messages')
     sent_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_client_messages')
     message = models.TextField()
     scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='client_only', db_index=True)
@@ -1407,7 +1407,7 @@ class ClientPresenceSession(models.Model):
         db_index=True,
     )
     client = models.ForeignKey(
-        'core.Organisation',
+        'organisation.Organisation',
         on_delete=models.CASCADE,
         related_name='presence_sessions',
         db_index=True,
@@ -1472,7 +1472,7 @@ class Photographer(models.Model):
 
 class PhotographerAssignment(models.Model):
     photographer = models.ForeignKey(Photographer, on_delete=models.CASCADE, related_name='photographer_assignments')
-    client = models.ForeignKey('core.Organisation', on_delete=models.CASCADE, related_name='photographer_assignments')
+    client = models.ForeignKey('organisation.Organisation', on_delete=models.CASCADE, related_name='photographer_assignments')
     expires_at = models.DateTimeField(null=True, blank=True)
     # Specific table IDs this photographer can see for this client.
     # Empty list = all tables are accessible (default / unrestricted).
@@ -1515,7 +1515,7 @@ class SystemMetricSnapshot(models.Model):
         ('RED', 'Critical (Upgrade Required)'),
     ]
 
-    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
+    timestamp = models.DateTimeField(default=timezone.now)
     cpu_percent = models.FloatField(default=0.0)
     memory_percent = models.FloatField(default=0.0)
     memory_rss_mb = models.FloatField(default=0.0)

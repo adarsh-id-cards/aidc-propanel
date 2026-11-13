@@ -119,7 +119,6 @@ class Organisation(models.Model):
         max_length=20,
         choices=ORG_TYPE_CHOICES,
         default='school',
-        db_column='client_type',
         db_index=True,
         help_text='Type of organisation: school, college, company, or other',
     )
@@ -137,7 +136,7 @@ class Organisation(models.Model):
     state = models.CharField(max_length=100, blank=True, null=True)
     pincode = models.CharField(max_length=10, blank=True, null=True)
 
-    perm_organisation_list = models.BooleanField(default=False, db_column='perm_idcard_client_list')
+    perm_organisation_list = models.BooleanField(default=False)
 
     perm_idcard_setting_list = models.BooleanField(default=False)
     perm_idcard_setting_add = models.BooleanField(default=False)
@@ -202,7 +201,7 @@ class Organisation(models.Model):
     def perm_idcard_delete_from_deleted(self, value):
         self.perm_idcard_delete_from_pool = value
 
-    # Legacy compat: old code accessed perm_idcard_client_list
+    # Legacy compat: old code accessed perm_idcard_client_list / client_type
     @property
     def perm_idcard_client_list(self):
         return self.perm_organisation_list
@@ -210,6 +209,14 @@ class Organisation(models.Model):
     @perm_idcard_client_list.setter
     def perm_idcard_client_list(self, value):
         self.perm_organisation_list = value
+
+    @property
+    def client_type(self):
+        return self.org_type
+
+    @client_type.setter
+    def client_type(self, value):
+        self.org_type = value
 
     def get_or_infer_org_type(self):
         """Return explicit org_type if set to non-other, else infer from organisation name."""
@@ -229,6 +236,10 @@ class Organisation(models.Model):
         return self.name
 
     def __init__(self, *args, **kwargs):
+        if 'client_type' in kwargs:
+            kwargs.setdefault('org_type', kwargs.pop('client_type'))
+        if 'perm_idcard_client_list' in kwargs:
+            kwargs.setdefault('perm_organisation_list', kwargs.pop('perm_idcard_client_list'))
         super().__init__(*args, **kwargs)
         self._original_name = self.__dict__.get('name') if self.pk else None
 
@@ -352,6 +363,8 @@ class Organisation(models.Model):
             for f in kwargs['update_fields']:
                 if f == 'perm_idcard_client_list':
                     mapped_fields.append('perm_organisation_list')
+                elif f == 'client_type':
+                    mapped_fields.append('org_type')
                 elif f in ('perm_manage_client_staff', 'perm_manage_staff'):
                     mapped_fields.append('perm_manage_assistants')
                 else:
@@ -371,13 +384,12 @@ class Organisation(models.Model):
         super().delete(*args, **kwargs)
 
     class Meta:
-        app_label = 'core'          # Keep core migration compatibility
-        db_table = 'core_client'    # Reuse existing DB table — no destructive migration
+        app_label = 'organisation'
+        db_table = 'organisation_organisation'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['status', '-created_at']),
-            models.Index(fields=['created_at']),
-            models.Index(fields=['status', 'created_at'], name='core_client_status_created_idx'),
+            models.Index(fields=['status', '-created_at'], name='org_status_created_desc_idx'),
+            models.Index(fields=['created_at'], name='org_created_at_idx'),
             models.Index(fields=['subscription', 'status'], name='org_sub_status_idx'),
             models.Index(fields=['subscription', '-created_at'], name='org_sub_time_idx'),
             models.Index(fields=['owner', 'status'], name='org_owner_status_idx'),
@@ -404,8 +416,30 @@ class OrganisationManager(models.Model):
         Organisation,
         on_delete=models.CASCADE,
         related_name='managers',
-        db_column='client_id',
     )
+
+    def __init__(self, *args, **kwargs):
+        if 'client' in kwargs:
+            kwargs.setdefault('organisation', kwargs.pop('client'))
+        if 'client_id' in kwargs:
+            kwargs.setdefault('organisation_id', kwargs.pop('client_id'))
+        super().__init__(*args, **kwargs)
+
+    @property
+    def client(self):
+        return self.organisation
+
+    @client.setter
+    def client(self, value):
+        self.organisation = value
+
+    @property
+    def client_id(self):
+        return self.organisation_id
+
+    @client_id.setter
+    def client_id(self, value):
+        self.organisation_id = value
     manager_type = models.CharField(
         max_length=20,
         choices=MANAGER_TYPE_CHOICES,
