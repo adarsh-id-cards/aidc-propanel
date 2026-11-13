@@ -169,12 +169,15 @@ def _serialize_assignment_history_event(entry, action_display_map, now):
 
 def _build_personal_guide_text(share_url):
     """Build the downloadable plain-text personal guide content."""
+    panel_base = getattr(django_settings, 'PANEL_URL', None) or getattr(django_settings, 'SITE_URL', 'https://panel.adarshbhopal.in')
+    if not panel_base.endswith('/'):
+        panel_base += '/'
     lines = [
         "ADARSH ID CARDS - PERSONAL GUIDE (CLIENT OPERATIONS)",
         "=" * 62,
         "",
         "Student Data Check, Corrections ya New Add karne ke liye is panel se login kare:",
-        "https://panel.adarshbhopal.in/",
+        panel_base,
         "",
         "Client section me login kare:",
         "email id: Organisation.demo@example.com",

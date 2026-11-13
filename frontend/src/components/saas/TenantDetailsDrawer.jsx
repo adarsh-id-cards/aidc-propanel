@@ -1328,39 +1328,45 @@ export default function TenantDetailsDrawer({
               </div>
 
               {/* 1. Primary Subdomain Card */}
-              <div
-                style={{
-                  background: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
-                    Standard Cloud Subdomain
-                  </div>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', marginTop: '4px' }}>
-                    https://{subscription.slug}.cardflow.io
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
-                    <CheckCircle2 size={13} /> Active &amp; SSL Secured
-                  </div>
-                </div>
+              {(() => {
+                const tenantBaseDomain = import.meta.env.VITE_TENANT_BASE_DOMAIN || (typeof window !== 'undefined' ? window.location.host : 'propanel.in');
+                const tenantUrl = `https://${subscription.slug}.${tenantBaseDomain}`;
+                return (
+                  <div
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
+                        Standard Cloud Subdomain
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', marginTop: '4px' }}>
+                        {tenantUrl}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
+                        <CheckCircle2 size={13} /> Active &amp; SSL Secured
+                      </div>
+                    </div>
 
-                <a
-                  href={`https://${subscription.slug}.cardflow.io`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="saas-btn saas-btn-secondary saas-btn-sm"
-                  style={{ textDecoration: 'none' }}
-                >
-                  <ExternalLink size={13} /> Open Domain
-                </a>
-              </div>
+                    <a
+                      href={tenantUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="saas-btn saas-btn-secondary saas-btn-sm"
+                      style={{ textDecoration: 'none' }}
+                    >
+                      <ExternalLink size={13} /> Open Domain
+                    </a>
+                  </div>
+                );
+              })()}
 
               {/* 2. Custom Domain Setup */}
               <div

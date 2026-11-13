@@ -258,15 +258,6 @@ _DEV_ORIGINS = [
     'http://127.0.0.1:8001',
     'http://localhost:8008',
     'http://127.0.0.1:8008',
-    'http://192.168.1.9:5173',
-    'http://192.168.1.9:8008',
-    'https://*.loca.lt',
-    'https://*.trycloudflare.com',
-    'https://*.ngrok-free.app',
-    'https://*.ngrok.io',
-    'https://cardflow.in',
-    'https://www.cardflow.in',
-    'https://privatexyz.cardflow.in',
 ] if DEBUG else []
 
 # Production origins always come from environment — never from hardcoded lists.

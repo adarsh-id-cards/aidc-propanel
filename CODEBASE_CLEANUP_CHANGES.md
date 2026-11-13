@@ -125,6 +125,48 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 ## 4. Frontend Optimization & Verification
 
 - **Linter**: `oxlint` executed across all 79 JSX/JS files. **0 errors, 0 warnings**.
-- **Production Build**: `vite build` completed in **960ms**, producing clean production assets in `frontend/dist/`.
+- **Production Build**: `vite build` completed, producing clean production assets in `frontend/dist/`.
 - **Dead Assets**: Evaluated `frontend/public/` and `src/assets/`. All assets are referenced by active views.
+
+---
+
+## 5. Deployment Hardcoding Cleanup & Generalization
+
+### `backend/full_api_test.py`
+- **Action**: Completely removed from repository.
+- **Why Safe**: Standalone ad-hoc testing script that contained hardcoded test credentials (`admin123`) and localhost targets (`http://localhost:8000`). Not part of pytest or production.
+
+### `backend/config/settings.py`
+- **Location**: `_DEV_ORIGINS`
+- **Change**: Removed developer LAN IP (`192.168.1.9`) and obsolete domains (`cardflow.in`, `privatexyz.cardflow.in`) from CORS development whitelist.
+- **Why Safe**: In production, CORS origins are strictly driven by `CORS_ALLOWED_ORIGINS` in `.env`.
+
+### `backend/core/management/commands/bootstrap_production.py`
+- **Location**: Lines 33–65
+- **Change**: Updated `--default-password` to prioritize `os.getenv('BOOTSTRAP_DEFAULT_PASSWORD')` rather than defaulting solely to hardcoded `'Password@123'`.
+- **Why Safe**: Enables secure, environment-driven account provisioning without committing plain-text passwords.
+
+### `backend/core/views/admin_page_views.py`
+- **Location**: Line 172
+- **Change**: Updated `_build_personal_guide_text` to dynamically resolve `PANEL_URL` or `SITE_URL` from settings instead of hardcoding `https://panel.adarshbhopal.in/`.
+- **Why Safe**: Ensures personal guide download reflects the actual tenant domain where Pro Panel is deployed.
+
+### `backend/core/views/banners_api.py`
+- **Location**: Lines 8–105
+- **Change**: Replaced hardcoded `https://cardflow.in/*` target URLs with dynamically resolved URLs using `CATALOG_WEBSITE_URL` or `SITE_URL`.
+- **Why Safe**: Allows production deployments to point banner links to their own store, catalog, or relative path.
+
+### `backend/mobile_api/views.py`
+- **Location**: Lines 5231–5236
+- **Change**: Prioritized `os.getenv('LANDING_WEBSITE_URL')` for resolving the public media and website URL before falling back to domain matching.
+- **Why Safe**: Guarantees that any custom landing website domain set in production `.env` is immediately honored.
+
+### `frontend/src/components/saas/TenantDetailsDrawer.jsx`
+- **Location**: Lines 1330–1365
+- **Change**: Replaced hardcoded `https://{subscription.slug}.cardflow.io` with dynamic URL resolution using `import.meta.env.VITE_TENANT_BASE_DOMAIN || window.location.host`.
+- **Why Safe**: Allows multi-tenant subdomain previews to reflect the current deployment host or configured tenant domain.
+
+### `frontend/.env.example`
+- **Action**: Added documentation for `VITE_TENANT_BASE_DOMAIN` and updated the production API endpoint example.
+
 

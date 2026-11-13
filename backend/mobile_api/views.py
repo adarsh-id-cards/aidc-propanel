@@ -5228,11 +5228,13 @@ def api_website_landing_data(request):
     # 1. Determine website media base URL
     proto = "https" if request.is_secure() else "http"
     ip_or_domain = request.get_host().split(':')[0]
-    if 'panel.adarshbhopal.in' in ip_or_domain:
+    env_url = os.getenv('LANDING_WEBSITE_URL', '').rstrip('/')
+    if env_url:
+        website_base_url = env_url
+    elif 'panel.adarshbhopal.in' in ip_or_domain:
         website_base_url = "https://www.adarshbhopal.in"
     else:
-        env_url = os.getenv('LANDING_WEBSITE_URL', '').rstrip('/')
-        website_base_url = env_url if env_url else f"{proto}://{ip_or_domain}:8001"
+        website_base_url = f"{proto}://{ip_or_domain}:8001"
 
     def make_absolute(path):
         if not path:

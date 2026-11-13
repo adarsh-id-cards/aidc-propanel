@@ -17,6 +17,7 @@ Usage:
     python manage.py bootstrap_production --verify-only
 """
 
+import os
 import sys
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
@@ -32,8 +33,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--default-password',
-            default='Password@123',
-            help='Default password to assign to bootstrapped accounts (default: Password@123)',
+            default=None,
+            help='Default password to assign to bootstrapped accounts (default: BOOTSTRAP_DEFAULT_PASSWORD env var or Password@123)',
         )
         parser.add_argument(
             '--prime-password',
@@ -58,7 +59,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         verify_only = options.get('verify_only', False)
-        default_pwd = options.get('default_password') or 'Password@123'
+        default_pwd = options.get('default_password') or os.getenv('BOOTSTRAP_DEFAULT_PASSWORD') or 'Password@123'
         prime_pwd = options.get('prime_password') or default_pwd
         super_pwd = options.get('super_password') or default_pwd
         manager_pwd = options.get('manager_password') or default_pwd
