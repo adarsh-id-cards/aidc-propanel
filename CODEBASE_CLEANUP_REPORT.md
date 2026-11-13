@@ -123,4 +123,14 @@ Static analysis across all non-migration backend files uncovered 13 critical run
   ```text
   ✓ built in 960ms (2,952 modules transformed)
   ```
-- **Automated Pytest Suite**: Core test suites for `organisation`, `accounts`, and `tables` executed and passed.
+- **Automated Pytest Suite**:
+  ```text
+  collected 243 items
+  organisation\tests.py ........................................................................................... [ 42%]
+  accounts\tests.py ........................................................................................        [ 78%]
+  tables\tests\test_data_collection.py ................                                                             [ 85%]
+  tables\tests\test_tables.py ....................................                                                  [100%]
+  ================= 243 passed, 1 warning in 506.94s (0:08:26) ==================
+  ```
+  100% pass rate across all 243 automated tests.
+
