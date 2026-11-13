@@ -66,13 +66,13 @@ with open(sha256_txt_path, "w", encoding="utf-8") as sf:
 print(f"Saved Manifest : {manifest_path}")
 print(f"Saved Checksums: {sha256_txt_path}")
 
-# Connect to local cardflow_db to inspect media references in the database
+# Connect to database to inspect media references in the database
 env_vals = dotenv_values(backend_dir / ".env")
 db_host = env_vals.get("POSTGRES_HOST") or env_vals.get("DB_HOST", "localhost")
-db_port = env_vals.get("POSTGRES_PORT") or env_vals.get("DB_PORT", "5432")
-db_user = env_vals.get("POSTGRES_USER") or env_vals.get("DB_USER", "postgres")
+db_port = env_vals.get("POSTGRES_PORT") or env_vals.get("DB_PORT", "5433")
+db_user = env_vals.get("POSTGRES_USER") or env_vals.get("DB_USER", "propanel_user")
 db_password = env_vals.get("POSTGRES_PASSWORD") or env_vals.get("DB_PASSWORD", "")
-db_name = env_vals.get("POSTGRES_DB") or env_vals.get("DB_NAME", "cardflow_db")
+db_name = env_vals.get("POSTGRES_DB") or env_vals.get("DB_NAME", "propanel_db")
 
 try:
     conn = psycopg2.connect(

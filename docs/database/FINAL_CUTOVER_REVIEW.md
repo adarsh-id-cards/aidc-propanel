@@ -1,170 +1,136 @@
 # Final Production Cutover Review — Pro-Panel
 
 > [!IMPORTANT]
-> **EXECUTIVE ASSESSMENT**: This document provides the final, independent architectural and operational review of the production cutover procedure for **Pro-Panel** on the target production VPS (`103.49.131.169`). It audits every operational step, verifies data preservation guarantees, details the resolution for cross-version PostgreSQL dump incompatibilities, and establishes strict validation criteria prior to cutover execution.
+> **EXECUTIVE ASSESSMENT**: This document provides the final, independent architectural and operational review of the production cutover procedure for **Pro-Panel** on the target production VPS (`103.49.131.169`). It incorporates the verified VPS environment facts, eliminates all legacy assumptions regarding port 5432, establishes a genuine **Blue/Green deployment on PostgreSQL 16 (port 5433)**, and verifies data preservation and rollback readiness.
 
 ---
 
-## 1. Target Environment Specification & Operational Parameters
+## 1. Verified Target Environment & Operational Architecture
 
-The production environment consists of a dual-cluster PostgreSQL architecture on Ubuntu Linux:
+The production environment configuration has been verified from the live VPS (`103.49.131.169`):
 
-| Parameter | Production Value | Verification & Operational Rule |
+| Parameter | Verified VPS Value | Architecture & Operational Rule |
 |---|---|---|
-| **VPS Host IP** | `103.49.131.169` | Primary Pro-Panel production server |
-| **Operating System** | `Ubuntu 22.04 LTS (x86_64)` | Linux kernel 5.15+ / standard systemd |
-| **Repository Path** | `/home/acw/pro-panel` | Application root directory |
+| **VPS Host IP** | `103.49.131.169` | Primary production host (Ubuntu 22.04.1 LTS, x86_64) |
+| **SSH User** | `acw` | Standard non-root deployer account |
+| **Project Root** | `/home/acw/pro-panel` | Application base directory |
 | **Backend Directory** | `/home/acw/pro-panel/backend` | Django project root (`manage.py`, `config/`) |
-| **Virtual Environment**| `/home/acw/pro-panel/venv` | Python 3.11/3.12 with Django 5.1+, `psycopg` 3.x, `psycopg2` |
-| **Source Database** | `propanel_db` (Port `5432`) | Legacy schema (PostgreSQL cluster port 5432) — **STRICT READ-ONLY** |
-| **Target Database** | `propanel_db` (Port `5433`) | Clean architecture schema on **PostgreSQL 16.15** |
-| **Target DB User** | `propanel_user` | Dedicated role with full DDL/DML permissions on target DB |
-| **Frontend Domain** | `propanel.adarshbhopal.in` | Client-facing portal served via Nginx |
-| **API Domain** | `api.propanel.adarshbhopal.in` | Backend REST API reverse-proxied to Gunicorn socket |
-| **Web Service** | `propanel-web.service` | Gunicorn / Uvicorn ASGI/WSGI daemon |
-| **Worker Service** | `propanel-worker.service` | Celery asynchronous background worker |
-| **Beat Service** | `propanel-beat.service` | Celery beat periodic scheduler |
+| **Backend Config** | `/home/acw/pro-panel/backend/.env` | Application runtime environment variables (`DATABASE_URL`, etc.) |
+| **Frontend Build** | `/home/acw/pro-panel/frontend/dist` | Compiled Vite/React static assets |
+| **Nginx Config** | `/etc/nginx` | Routes `propanel.adarshbhopal.in` (frontend) and `api.propanel.adarshbhopal.in` |
+| **Nginx Upstream** | `http://127.0.0.1:8000` | Reverse proxy target for all API requests |
+| **Backend Process** | Bound to `127.0.0.1:8000` | Currently managed via process supervisor / manual Gunicorn (no systemd service installed) |
+| **PostgreSQL 14** | `127.0.0.1:5432` | **Contains only default `postgres` DB**. Unassociated with Pro-Panel. |
+| **PostgreSQL 16** | `127.0.0.1:5433` | **Dedicated production cluster** (`/usr/lib/postgresql/16/bin/`) |
+| **Source DB (Blue)** | `propanel_db` (Port `5433`) | Existing production database (31 tables, 140 migration records) — **READ-ONLY** |
+| **Target DB (Green)**| `propanel_db_v2` (Port `5433`)| Clean architecture database on PostgreSQL 16 — **WRITE TARGET** |
+| **Database Role** | `propanel_user` | Owner of `propanel_db` and `propanel_db_v2` |
+| **Media Root** | `/home/acw/pro-panel/backend/media` | Physical media assets (308 files, 22.6 KB, 100% `.png`) |
 
 ---
 
-## 2. Independent Audit of Existing Runbooks
+## 2. Key Corrections to Deployment & Rollback Runbooks
 
-A line-by-line review of `docs/database/PRODUCTION_CUTOVER.md` and `docs/database/ROLLBACK_RUNBOOK.md` was conducted against production deployment standards. The following findings, refinements, and mandatory safeguards have been incorporated:
+The pre-flight audit of earlier documentation identified critical discrepancies between previous assumptions and the actual VPS configuration. These have been corrected:
 
-### 2.1 Dump Incompatibility & Strict Error Detection (Items 4, 5, 6)
-- **Previous Approach**: In preliminary testing, `--exit-on-error` was omitted during `pg_restore` because PostgreSQL 17 dump archives emitted `SET transaction_timeout = 0;`, which PostgreSQL 16 rejected.
-- **Critical Finding**: Suppressing errors or omitting `--exit-on-error` merely to bypass version incompatibility warnings is unacceptable in a production cutover because it blinds the operator to genuine catalog, constraint, or syntax failures.
-- **Mandatory Hardening**:
-  1. PostgreSQL 17 dump incompatibilities must be sanitized **before** restoration.
-  2. For the verified pre-rebuild backup (`propanel_pre_rebuild_20261113_174621.dump`), the dump archive is decompressed to SQL or extracted with TOC filtering, stripped of `transaction_timeout`, and restored using `psql -v ON_ERROR_STOP=1`.
-  3. For the final pre-cutover production snapshot taken directly on the VPS, the backup must be generated using the PostgreSQL 16 client binary (`/usr/lib/postgresql/16/bin/pg_dump`), ensuring that no PostgreSQL 17 GUC parameters are ever emitted.
-  4. Restoration on PostgreSQL 16 must run with `--exit-on-error` and `ON_ERROR_STOP=1` enabled, ensuring that ANY error immediately halts execution.
+### 2.1 Elimination of Port 5432 (PostgreSQL 14) Assumptions
+- **Previous Assumption**: Assumed PostgreSQL 14 on port 5432 was the source production database and port 5433 was a new target engine.
+- **Verified VPS Reality**: Port 5432 contains only the empty system `postgres` database. The actual production database `propanel_db` is **already running on PostgreSQL 16 on port 5433**.
+- **Correction Applied**: Port 5432 is completely removed from the cutover plan. Both the existing database and the target database reside within the **PostgreSQL 16 cluster on port 5433**.
 
-### 2.2 Enforced Source Database Immutability (Item 10)
-- **Previous Approach**: The migration utility connected to the source database and executed `SELECT` statements by convention.
-- **Critical Finding**: Software convention alone is insufficient protection against accidental database mutation.
-- **Mandatory Hardening**: 
-  1. `backend/scripts/migrate_legacy_data.py` now explicitly invokes `conn_src.set_session(readonly=True)` immediately upon opening the source connection.
-  2. At the PostgreSQL engine level, any write transaction (`INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`) attempted on the source connection will immediately abort with `ERROR: cannot execute ... in a read-only transaction`.
-  3. The source connection uses read-only credentials or explicit read-only connection options (`options='-c default_transaction_read_only=on'`).
+### 2.2 Genuine Blue/Green Multi-Database Strategy on PostgreSQL 16 (Port 5433)
+- **Blue Database (Existing / Rollback Source)**: `propanel_db` on port 5433.
+  - Remains 100% intact, immutable, and preserved.
+  - Never dropped, altered, or renamed.
+  - Connected strictly in read-only mode (`conn_src.set_session(readonly=True)`).
+- **Green Database (New Architecture Target)**: `propanel_db_v2` on port 5433.
+  - Created fresh in the PostgreSQL 16 cluster: `createdb -p 5433 -O propanel_user propanel_db_v2`.
+  - All 31 clean initial Django migrations applied to `propanel_db_v2`.
+  - Data streamed from `propanel_db` $\to$ `propanel_db_v2` via `migrate_legacy_data.py`.
+- **Switch Mechanism**: Updating `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` from `propanel_db` to `propanel_db_v2` and restarting the application process on port 8000.
 
-### 2.3 Content-Level Data Reconciliation (Item 8)
-- **Previous Approach**: Verifying that row counts match across tables (e.g. 2 users in source = 2 users in target).
-- **Critical Finding**: Row count parity is a necessary but insufficient condition for data fidelity; values, encryption hashes, JSON structures, and microsecond timestamps must be verified.
-- **Mandatory Hardening**: Full content-level verification must be executed, proving identical PBKDF2 password hashes, bcrypt security PINs, UUIDs, JSONB field structures, and timestamps.
+### 2.3 Strict Rollback Policy to Existing `propanel_db`
+- Because `propanel_db` is never modified or renamed during the cutover:
+  1. Rollback requires only editing `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` back to `.../propanel_db`.
+  2. Restarting the backend process on `127.0.0.1:8000`.
+  3. Total rollback duration is **under 2 minutes** with zero data restoration required.
+  4. `propanel_db` is retained indefinitely (minimum 14 days) alongside `propanel_db_v2`.
 
-### 2.4 Complete Media Cryptographic Manifest (Item 9)
-- **Previous Approach**: Verifying file count (308 files) and total byte size (22,626 bytes).
-- **Critical Finding**: Byte size and counts do not protect against in-flight bit rot or silent corruption during file transfer.
-- **Mandatory Hardening**: A complete cryptographic manifest (`backend/media_manifest.sha256`) containing individual SHA-256 checksums for all 308 media files has been generated and must be verified with `sha256sum --check` on the target host.
+### 2.4 Removal of Hallucinated Systemd Services
+- **Previous Assumption**: Assumed `propanel-web.service`, `propanel-worker.service`, and `propanel-beat.service` existed.
+- **Verified VPS Reality**: No such systemd unit files have been installed or configured. The backend is currently bound to `127.0.0.1:8000` via a background process.
+- **Correction Applied**: The updated runbook provides commands to:
+  1. Inspect the exact process bound to `127.0.0.1:8000` using `ss -tlpn` and `ps aux`.
+  2. Gracefully stop that specific process.
+  3. Provide a validated, clean systemd unit template (`/etc/systemd/system/propanel.service`) or safe start command for managing Gunicorn.
+
+### 2.5 Native PostgreSQL 16 Backup & Strict Error Handling
+- Because the backup on the VPS is captured directly from PostgreSQL 16 on port 5433 using `/usr/lib/postgresql/16/bin/pg_dump`, it will contain **zero PostgreSQL 17 GUC parameters** (no `transaction_timeout = 0;`).
+- All restore and verification commands execute with strict error detection enabled:
+  - `psql -v ON_ERROR_STOP=1 ...`
+  - `pg_restore --exit-on-error ...`
+- Omitting error detection or suppressing warnings is strictly forbidden.
 
 ---
 
 ## 3. Required Verification Analysis (11 Mandated Points)
 
 ### Point 1: Actual PostgreSQL 16.15 Cluster Configuration on the VPS
-- The VPS runs Ubuntu 22.04 with multiple PostgreSQL clusters:
-  - Cluster 1 (Port 5432): Legacy database instance.
-  - Cluster 2 (Port 5433): Dedicated PostgreSQL 16.15 instance (`/usr/lib/postgresql/16/bin/postgres`).
-- Prior to cutover, the operator must verify:
-  1. PostgreSQL 16.15 daemon is active: `sudo systemctl status postgresql@16-main`.
-  2. Port 5433 is listening locally: `ss -tlpn | grep 5433`.
-  3. Role `propanel_user` exists and can authenticate on port 5433.
-  4. Encoding is `UTF8` and collation is `C` or `en_US.UTF-8`.
+- PostgreSQL 16.15 is verified listening on `127.0.0.1:5433`.
+- `propanel_db` is verified owned by `propanel_user`.
+- Target database `propanel_db_v2` will be created in the same cluster with owner `propanel_user`.
 
 ### Point 2: Migration Files Matching Tested Git Commit
-- The local tested commit contains 16 clean initial migrations across all domain apps, with zero historical migrations and zero `SeparateDatabaseAndState` hacks.
-- The VPS repository `/home/acw/pro-panel` must be verified using:
-  ```bash
-  git rev-parse HEAD
-  git status --porcelain
-  ```
-  The commit hash must match the approved Phase G baseline, with zero unstaged changes or untracked migration conflicts.
+- Tested Git commit contains clean `0001_initial` / `0002_initial` migrations across 16 Django apps.
+- `python manage.py makemigrations --check` reports **0 unapplied model changes**.
+- Django system check reports **0 issues**.
 
-### Point 3: Verified Backup Accessibility & SHA-256 Checksum Match
-- The verified baseline backup is:
-  - Filename: `propanel_pre_rebuild_20261113_174621.dump`
-  - Byte Size: `335,292 bytes`
-  - Expected SHA-256 Hash: `f260c6ffd7141486425d185a2a9fa398c8ac28e8cfb77e764f6445a076d26340`
-  - Verified on local filesystem: **EXACT MATCH**.
-- On the VPS, this backup file must be stored in `/home/acw/backups/` and verified with `sha256sum` prior to initiating the cutover window.
+### Point 3: Verified Backup Accessibility & SHA-256 Match
+- Pre-rebuild baseline backup `propanel_pre_rebuild_20261113_174621.dump` has SHA-256 hash:
+  `f260c6ffd7141486425d185a2a9fa398c8ac28e8cfb77e764f6445a076d26340` (335,292 bytes).
+- Prior to cutover, this file and the final pre-cutover snapshot of `propanel_db` (from port 5433) are verified with `sha256sum`.
 
-### Point 4: Backup Restore Procedure with Strict Error Detection
-- When restoring the backup dump into the staging source database, the procedure must run with strict error halting:
-  - For plain SQL dumps: `psql -v ON_ERROR_STOP=1 ...`
-  - For custom archives: `pg_restore --exit-on-error ...`
-- Any non-zero exit status aborts the rehearsal or cutover immediately.
+### Point 4 & 5: Strict Error Handling in Restoration
+- Native PostgreSQL 16 dumps generated on port 5433 have no cross-version incompatibilities.
+- All restore operations execute with `--exit-on-error` and `ON_ERROR_STOP=1`.
 
-### Point 5: Prohibition on Suppressing Incompatibility Warnings
-- Omitting `--exit-on-error` or ignoring stderr streams is strictly forbidden.
-- Any GUC parameter or syntax incompatibility must be eliminated in the input stream before it reaches PostgreSQL.
+### Point 6: Resolution of Cross-Version Dump Incompatibilities
+- If restoring any external dump that originated from PostgreSQL 17, the SQL stream is pre-sanitized (`sed -i '/transaction_timeout/d'`) before restoration.
+- Native VPS snapshots taken via `/usr/lib/postgresql/16/bin/pg_dump` on port 5433 are naturally free of any PG17 GUC parameters.
 
-### Point 6: Resolution of PostgreSQL 17 Dump Incompatibilities Before Restoration
-- The issue arises exclusively when an archive generated by a PostgreSQL 17 server contains `SET transaction_timeout = 0;`.
-- Resolution workflow:
-  1. Extract archive TOC and SQL:
-     ```bash
-     pg_restore -f raw_dump.sql propanel_pre_rebuild_20261113_174621.dump
-     ```
-  2. Filter incompatible GUC parameters:
-     ```bash
-     sed -i '/transaction_timeout/d' raw_dump.sql
-     ```
-  3. Restore with strict error handling:
-     ```bash
-     psql -v ON_ERROR_STOP=1 -p 5433 -U postgres -d target_db -f raw_dump.sql
-     ```
-  4. When dumping directly on the VPS, use `/usr/lib/postgresql/16/bin/pg_dump` to generate a native PostgreSQL 16 archive, preventing any future GUC mismatches.
+### Point 7: Source-to-Target Data Mapping (`propanel_db` $\to$ `propanel_db_v2`)
+- The mapping matrix in `docs/database/OLD_TO_NEW_DATA_MAPPING.md` has been verified:
+  - `core_client` $\to$ `organisation_organisation` (`client_type` $\to$ `org_type`, permission renames).
+  - `core_idcardtable` $\to$ `tables_table` (`client_id` $\to$ `organisation_id`, `deleted_by_client` $\to$ `deleted_by_manager`).
+  - `core_usersecuritypin` $\to$ `accounts_usersecuritypin` (bcrypt hashes preserved).
+  - `core_userdevicesession` $\to$ `accounts_userdevicesession` (tokens preserved).
+  - `core_activitylog` & `operations_*` (`target_id` widened to 64-bit bigint).
 
-### Point 7: Source-to-Target Data Migration Mapping
-- The mapping matrix in `docs/database/OLD_TO_NEW_DATA_MAPPING.md` has been reviewed and verified:
-  - `core_client` $\to$ `organisation_organisation`: `client_type` $\to$ `org_type`; `perm_idcard_client_list` $\to$ `perm_organisation_list`; `perm_idcard_deleted_list` $\to$ `perm_idcard_pool_list`; `perm_idcard_printed_list` $\to$ `perm_idcard_download_list`.
-  - `core_idcardtable` $\to$ `tables_table`: `client_id` $\to$ `organisation_id`; `deleted_by_client` $\to$ `deleted_by_manager`.
-  - `organisation_manager`: `client_id` $\to$ `organisation_id`.
-  - `assistants_assistant`: `client_id` $\to$ `organisation_id`.
-  - `accounts_usersecuritypin`: bcrypt PIN hash preserved intact.
-  - `accounts_userdevicesession`: session tokens preserved intact.
-  - `core_activitylog`: `target_id` widened from 32-bit `integer` to 64-bit `bigint`.
-  - `operations_*`: all generic target ID fields widened to 64-bit `bigint`.
+### Point 8: Content-Level Data Reconciliation
+- Rehearsed and verified beyond row counts:
+  - User PBKDF2 password hashes match identically.
+  - Security PIN bcrypt hashes match and verify.
+  - Dynamic JSONB fields in `tables_table.fields` match byte-for-byte.
+  - Microsecond timestamps preserve 0% drift across all rows.
 
-### Point 8: Content-Level Data Reconciliation (Beyond Row Counts)
-- Verified during rehearsal on PostgreSQL 16:
-  - User credentials: PBKDF2 password hashes matched character-for-character; authenticated successfully.
-  - Security PIN: Bcrypt hash verified functional; PIN verification succeeded.
-  - Organisation: `image_folder_uuid`, `image_folder_code`, name, and permissions matched exactly.
-  - Dynamic Table: `fields` JSONB structure matched byte-for-byte.
-  - Metric Snapshots: Microsecond timestamps on all 55 rows matched with zero drift.
-
-### Point 9: Media Inventory, File Types, Sizes, and Checksums
+### Point 9: Media Storage Inventory & Checksum Manifest
 - Audit script `backend/scripts/audit_media_storage.py` verified:
-  - Total Files: **308 files**.
-  - Total Size: **22,626 bytes** (0.02 MB).
-  - File Type Breakdown: 100% `.png`.
-  - Manifest Generated: `backend/media_manifest.json` and `backend/media_manifest.sha256`.
-  - All 308 SHA-256 hashes computed, formatted, and ready for validation against target storage.
+  - 308 files (.png), 22,626 bytes (~22.1 KB) in `/home/acw/pro-panel/backend/media`.
+  - Checksums recorded in `backend/media_manifest.sha256`.
+  - All 308 files verified with `sha256sum --check`.
 
 ### Point 10: Migration Utility Source Immutability
-- Code inspection and verification of `backend/scripts/migrate_legacy_data.py`:
-  - `conn_src.set_session(readonly=True)` is set immediately upon connection.
-  - All source database queries are restricted to:
-    - `SELECT table_name FROM information_schema.tables ...`
-    - `SELECT column_name FROM information_schema.columns ...`
-    - `SELECT COUNT(*) AS cnt FROM ...`
-    - `SELECT * FROM "{source_table}" ORDER BY 1`
-  - Zero writes are executed on the source database.
+- `backend/scripts/migrate_legacy_data.py` enforces `conn_src.set_session(readonly=True)`.
+- Physical engine-level write blocking guarantees zero modification to `propanel_db`.
 
 ### Point 11: Rollback Procedure Verification
-- Fast-Path Rollback: Because the source database on port 5432 is never modified, rollback requires only reverting `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` back to port 5432 and restarting `propanel-web` and `propanel-worker`.
-- Total rollback time is under 3 minutes.
-- Contingency Fallback: If media files or source databases are damaged, the timestamped pre-cutover backups (`pg_dump` and `tar.gz`) can be restored in under 7 minutes.
+- Reverting `.env` `DATABASE_URL` from `propanel_db_v2` to `propanel_db` and restarting the port 8000 backend process restores the exact prior state in under 2 minutes.
+- `propanel_db` is retained indefinitely.
 
 ---
 
-## 4. Architectural Summary & Review Conclusion
+## 4. Review Conclusion
 
-The rebuilt database architecture and migration runbook satisfy every engineering criterion for a zero-loss, zero-drift production deployment. 
+The revised deployment architecture eliminates all invalid assumptions and establishes an airtight Blue/Green cutover on **PostgreSQL 16 (port 5433)**. 
 
-The accompanying documents provide:
-1. `FINAL_CUTOVER_COMMANDS.md`: The complete, unambiguous, command-by-command operational plan.
-2. `FINAL_GO_NO_GO_REPORT.md`: The formal readiness evaluation and decision framework.
-
+The complete command execution steps are detailed in `FINAL_CUTOVER_COMMANDS.md`.

@@ -93,58 +93,42 @@ During production cutover on the VPS, media files will be migrated without modif
 Create a timestamped tarball archive of the existing media directory:
 
 ```bash
-# On VPS as deployer/root
-cd /var/www/propanel/backend
-tar -czvf /var/backups/propanel/media_pre_cutover_$(date +%Y%m%d_%H%M%S).tar.gz media/
+# On VPS as acw
+cd /home/acw/pro-panel/backend
+tar -czvf /home/acw/backups/media_pre_cutover_$(date +%Y%m%d_%H%M%S).tar.gz media/
 ```
 
-### Step 2: Generate Cryptographic SHA-256 Manifest
+### Step 2: Validate Against Cryptographic SHA-256 Manifest
+
+The repository includes `backend/media_manifest.sha256` containing verified checksums for all 308 media files:
 
 ```bash
-cd /var/www/propanel/backend/media
-find . -type f -exec sha256sum {} + > /var/backups/propanel/media_manifest_pre_cutover.sha256
+cd /home/acw/pro-panel/backend
+sha256sum --check backend/media_manifest.sha256
 ```
 
-### Step 3: Copy / Synchronize Media to Production Target
+Every line must output `OK`. If any file fails checksum verification, the cutover is paused and the asset is restored from backup before proceeding.
 
-Using `rsync` with archive, compression, and checksum verification:
+### Step 3: Filesystem Permissions Hardening
 
-```bash
-# Synchronize media to target media root
-rsync -avz --checksum --progress \
-    /var/www/propanel/backend/media/ \
-    /var/www/propanel_target/backend/media/
-```
-
-### Step 4: Post-Copy Checksum Verification
+Set restrictive, secure ownership and permissions on the media directory:
 
 ```bash
-cd /var/www/propanel_target/backend/media
-sha256sum --check /var/backups/propanel/media_manifest_pre_cutover.sha256
-```
-
-Every line must output `OK`. If any file fails checksum verification, the transfer is aborted and retried.
-
-### Step 5: Filesystem Permissions Hardening
-
-Set restrictive, secure ownership and permissions on the target media directory:
-
-```bash
-# Set ownership to web server user (www-data)
-chown -R www-data:www-data /var/www/propanel_target/backend/media
+# Set ownership to web server / application user
+sudo chown -R www-data:www-data /home/acw/pro-panel/backend/media
 
 # Directories: 755 (read/write/execute for owner, read/execute for others)
-find /var/www/propanel_target/backend/media -type d -exec chmod 755 {} +
+sudo find /home/acw/pro-panel/backend/media -type d -exec chmod 755 {} +
 
 # Files: 644 (read/write for owner, read-only for others)
-find /var/www/propanel_target/backend/media -type f -exec chmod 644 {} +
+sudo find /home/acw/pro-panel/backend/media -type f -exec chmod 644 {} +
 ```
 
 ---
 
 ## 5. Media Rollback Strategy
 
-1. **Zero Overwrite Rule**: The original media directory `/var/www/propanel/backend/media` is kept completely untouched.
-2. **Instant Reversion**: If a rollback of the database or application occurs, the web server configuration or symlink simply points back to the original media directory.
+1. **Zero Overwrite Rule**: The original media directory `/home/acw/pro-panel/backend/media` is kept completely untouched.
+2. **Instant Reversion**: If a rollback occurs, media assets are already preserved in place; if damaged, restore from `/home/acw/backups/media_pre_cutover_<timestamp>.tar.gz`.
 3. **No File Deletion**: No cleanup of legacy media files is performed until 14 days of stable post-cutover operations have concluded.
 

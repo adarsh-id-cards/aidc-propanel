@@ -8,9 +8,9 @@
 # =============================================================================
 set -euo pipefail
 
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/propanel}"
+BACKUP_DIR="${BACKUP_DIR:-/home/acw/backups}"
 DB_HOST="${POSTGRES_HOST:-${DB_HOST:-localhost}}"
-DB_PORT="${POSTGRES_PORT:-${DB_PORT:-5432}}"
+DB_PORT="${POSTGRES_PORT:-${DB_PORT:-5433}}"
 DB_NAME="${POSTGRES_DB:-${DB_NAME:-}}"
 DB_USER="${POSTGRES_USER:-${DB_USER:-}}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"

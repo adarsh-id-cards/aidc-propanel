@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 DB_HOST="${POSTGRES_HOST:-${DB_HOST:-localhost}}"
-DB_PORT="${POSTGRES_PORT:-${DB_PORT:-5432}}"
+DB_PORT="${POSTGRES_PORT:-${DB_PORT:-5433}}"
 DB_USER="${POSTGRES_USER:-${DB_USER:-}}"
 TEST_DB_NAME="${TEST_DB_NAME:-propanel_rebuild_test}"
 ADMIN_DB="${ADMIN_DB:-postgres}"

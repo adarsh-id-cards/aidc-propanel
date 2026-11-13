@@ -188,8 +188,8 @@ Following ingestion, two automated validation tools run:
 
 ```bash
 python backend/scripts/migrate_legacy_data.py \
-    --source-dsn "postgres://user:pass@host:5432/source_db" \
-    --target-dsn "postgres://user:pass@host:5433/target_db" \
+    --source-dsn "postgres://propanel_user:PASSWORD@127.0.0.1:5433/propanel_db" \
+    --target-dsn "postgres://propanel_user:PASSWORD@127.0.0.1:5433/propanel_db_v2" \
     --dry-run
 ```
 
@@ -197,8 +197,8 @@ python backend/scripts/migrate_legacy_data.py \
 
 ```bash
 python backend/scripts/migrate_legacy_data.py \
-    --source-dsn "postgres://user:pass@host:5432/source_db" \
-    --target-dsn "postgres://user:pass@host:5433/target_db" \
+    --source-dsn "postgres://propanel_user:PASSWORD@127.0.0.1:5433/propanel_db" \
+    --target-dsn "postgres://propanel_user:PASSWORD@127.0.0.1:5433/propanel_db_v2" \
     --batch-size 1000
 ```
 

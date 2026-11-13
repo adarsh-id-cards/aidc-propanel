@@ -28,10 +28,10 @@ Use `backend/scripts/database_backup.sh` to create a custom-format PostgreSQL du
 
 ```bash
 POSTGRES_HOST=localhost \
-POSTGRES_PORT=5432 \
+POSTGRES_PORT=5433 \
 POSTGRES_DB=propanel_db \
 POSTGRES_USER=postgres \
-BACKUP_DIR=/var/backups/propanel \
+BACKUP_DIR=/home/acw/backups \
 bash backend/scripts/database_backup.sh
 ```
 
@@ -43,10 +43,10 @@ Use `backend/scripts/database_restore.sh` with the required `--confirm` safety f
 
 ```bash
 POSTGRES_HOST=localhost \
-POSTGRES_PORT=5432 \
+POSTGRES_PORT=5433 \
 POSTGRES_DB=propanel_db \
 POSTGRES_USER=postgres \
-bash backend/scripts/database_restore.sh /var/backups/propanel/propanel_propanel_db_<timestamp>.dump --confirm
+bash backend/scripts/database_restore.sh /home/acw/backups/propanel_propanel_db_<timestamp>.dump --confirm
 ```
 
 ---
@@ -63,14 +63,14 @@ When deploying the rebuilt schema and clean initial migrations to the production
    ```
 3. **Create Fresh Database & Apply Clean Initial Migrations**:
    ```bash
-   psql -U postgres -d postgres -c "CREATE DATABASE propanel_db_v2 OWNER propanel_user;"
-   DATABASE_URL="postgres://propanel_user:<password>@localhost:5432/propanel_db_v2" python backend/manage.py migrate --noinput
+   psql -p 5433 -U postgres -d postgres -c "CREATE DATABASE propanel_db_v2 OWNER propanel_user;"
+   DATABASE_URL="postgres://propanel_user:<password>@localhost:5433/propanel_db_v2" python backend/manage.py migrate --noinput
    ```
 4. **Run Schema, Migration & Health Verification**:
    ```bash
-   DATABASE_URL="postgres://propanel_user:<password>@localhost:5432/propanel_db_v2" python backend/scripts/verify_database_schema.py
-   DATABASE_URL="postgres://propanel_user:<password>@localhost:5432/propanel_db_v2" python backend/scripts/verify_migrations.py
-   DATABASE_URL="postgres://propanel_user:<password>@localhost:5432/propanel_db_v2" python backend/scripts/database_health_check.py
+   DATABASE_URL="postgres://propanel_user:<password>@localhost:5433/propanel_db_v2" python backend/scripts/verify_database_schema.py
+   DATABASE_URL="postgres://propanel_user:<password>@localhost:5433/propanel_db_v2" python backend/scripts/verify_migrations.py
+   DATABASE_URL="postgres://propanel_user:<password>@localhost:5433/propanel_db_v2" python backend/scripts/database_health_check.py
    ```
 5. **Atomic Database Swap / DSN Switch**:
    - Point `.env` `POSTGRES_DB=propanel_db_v2` (or rename databases after disconnecting clients), keeping the old database intact for instant rollback.
