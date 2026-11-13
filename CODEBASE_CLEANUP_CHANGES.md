@@ -202,25 +202,30 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 
 ### `backend/core/test_migration_0110.py`
 - **Location**: Entire file
-- **Action**: Dedicated unit and integration test suite with test-server isolation, strict allowlist enforcement, non-destructive lifecycle, and zero-credential offline execution:
+- **Action**: Dedicated unit and integration test suite with test-server isolation, strict allowlist enforcement, independent admin database safety validation, non-destructive lifecycle, and zero-credential offline execution:
   1. **Strict Opt-In & No Silent Defaults**:
      - PostgreSQL integration tests are disabled by default via `RUN_PG_MIGRATION_INTEGRATION_TESTS=1`. Without this explicit flag, integration tests cleanly skip without attempting any network connection.
      - Removed all default fallback passwords, hosts, ports, and admin database names (no default `postgres`).
      - Requires all 5 explicit connection environment variables: `PG_TEST_HOST`, `PG_TEST_PORT`, `PG_TEST_USER`, `PG_TEST_PASSWORD`, `PG_TEST_ADMIN_DB`. If any variable is missing or empty, skips with clear diagnostics before opening any socket.
-  2. **Test-Server Isolation via Explicit Allowlist Policy**:
+  2. **Independent Admin Database & Target Database Safety Policies**:
+     - `validate_admin_db_safety` independently inspects `PG_TEST_ADMIN_DB` BEFORE opening any connection.
+     - Requires all database connections (both admin and temporary test DB) to strictly follow the test-only naming policy (`test_` prefix with valid characters).
+     - Unconditionally rejects protected production database names (`propanel_db`, `cardflow_db`, `production`, `postgres`, `template1`, `template0`, etc.) for both admin and target databases.
+     - Ensures both admin database connection and temporary test database connection use the exact same validated host, port, credentials, and test-server isolation configuration.
+  3. **Test-Server Isolation via Explicit Allowlist Policy**:
      - Requires dedicated allowlist variables: `PG_TEST_ALLOWED_HOSTS` and `PG_TEST_ALLOWED_PORTS`.
      - Target host and port are normalized (stripping, lowercase, IP address validation, RFC 1123 hostname check, integer port range 1–65535) and matched against the parsed approved allowlist.
      - Strictly rejects any unapproved host or port, malformed syntax, or empty entries before attempting any database connection.
      - Never assumes `localhost` or `5432` is safe; does not approve a host merely because its name contains `test`.
-     - Unconditionally rejects protected production database names (`propanel_db`, `cardflow_db`, `production`, `postgres`, etc.) and production user identities (`propanel_user`, `cardflow_user`).
-  3. **Non-Destructive Database Lifecycle & Observability**:
+     - Unconditionally rejects protected production user identities (`propanel_user`, `cardflow_user`).
+  4. **Non-Destructive Database Lifecycle & Observability**:
      - Generates a unique, randomized temporary database name per run: `test_mig0110_<uuid>`.
      - Validates that target database name begins with `test_` and verifies it does not already exist via `SELECT 1 FROM pg_database WHERE datname = %s`. Never terminates connections or overwrites pre-existing databases.
      - `perform_test_cleanup` records `created_db_name` only after successful database creation.
      - If database creation fails, cleanup stops without attempting to drop anything.
      - Safe cleanup guarantees both test and admin connections are closed even if database drop fails. Emits clear errors with database name and exception details to stderr and logger without masking original test failures.
      - Never uses `DROP DATABASE IF EXISTS` or `pg_terminate_backend`.
-  4. **Isolated SQLite Unit Tests (Zero Credentials)**: 8 fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
+  5. **Isolated SQLite Unit Tests (Zero Credentials)**: 8 fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
      - NULL rows successfully backfilled from `organisation_id`.
      - NULL rows successfully backfilled from `group_id`.
      - Non-overwriting of existing valid `client_id`.
@@ -229,8 +234,8 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
      - Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
      - Migration re-runs safely and succeeds after administrator data remediation (idempotent).
      - SQLite existing-table path compatibility.
-  5. **Safety Guard Tests (17 tests)**: Verifies default skip behavior, missing credential rejection, missing allowlist rejection, approved host/port validation, unapproved host rejection, unapproved port rejection, malformed host/port rejection, production setting rejection under isolated server policy, no connection attempt when validation fails, cleanup failure reporting with connection closure, refusal to drop when creation fails, production DB/user protection, and refusal to overwrite pre-existing databases.
-  6. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on an approved, isolated disposable PostgreSQL test server.
+  6. **Safety Guard Tests (20 tests)**: Verifies default skip behavior, missing credential rejection, missing allowlist rejection, approved host/port validation, unapproved host rejection, unapproved port rejection, malformed host/port rejection, production setting rejection under isolated server policy, production admin DB rejection before connection, valid test admin DB acceptance, admin DB naming policy enforcement, no connection attempt when validation fails, cleanup failure reporting with connection closure, refusal to drop when creation fails, production DB/user protection, and refusal to overwrite pre-existing databases.
+  7. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on an approved, isolated disposable PostgreSQL test server.
 
 ### `backend/core/migrations/0108_add_org_role_to_organisation.py`
 - **Status**: Verified idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`. Safe for databases where `org_role` already exists.
@@ -246,7 +251,7 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 | **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
 | **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
 | **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
-| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **25 passed, 1 skipped in 0.20s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
+| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **28 passed, 1 skipped in 0.22s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
 | **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
 | **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
 | **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 62.83s. |

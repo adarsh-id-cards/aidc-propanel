@@ -29,7 +29,8 @@ ALLOWLIST_PG_TEST_VARS = [
 ]
 FORBIDDEN_DB_NAMES = {
     'propanel_db', 'cardflow_db', 'propanel', 'cardflow',
-    'production', 'prod', 'propanel_production', 'postgres'
+    'production', 'prod', 'propanel_production', 'postgres',
+    'template1', 'template0'
 }
 FORBIDDEN_USERS = {'propanel_user', 'cardflow_user'}
 
@@ -139,41 +140,80 @@ def parse_allowed_ports(allowed_ports_str):
     return allowed
 
 
+def validate_database_name_safety(db_name, role="Database"):
+    """
+    Validates that a database name satisfies strict test-only naming policies.
+    - Must be a non-empty string.
+    - Must begin with 'test_'.
+    - Must not match any forbidden production database name.
+    - Must not contain invalid or unsafe characters.
+    """
+    if not db_name or not isinstance(db_name, str):
+        raise RuntimeError(f"Safety violation: {role} name must be a non-empty string.")
+
+    cleaned = db_name.strip().lower()
+    if not cleaned:
+        raise RuntimeError(f"Safety violation: {role} name cannot be empty or whitespace.")
+
+    if cleaned in FORBIDDEN_DB_NAMES:
+        raise RuntimeError(f"Safety violation: {role} name '{db_name}' is a protected production database.")
+
+    if not cleaned.startswith('test_'):
+        raise RuntimeError(f"Safety violation: {role} name '{db_name}' must begin with 'test_'.")
+
+    if not re.match(r'^[a-z0-9_]+$', cleaned):
+        raise RuntimeError(f"Safety violation: {role} name '{db_name}' contains invalid characters.")
+
+    return cleaned
+
+
+def validate_admin_db_safety(admin_db):
+    """
+    Validates that the admin database satisfies the explicit test-only naming policy.
+    Rejects protected production database names (postgres, propanel_db, etc.)
+    and requires the 'test_' prefix.
+    """
+    return validate_database_name_safety(admin_db, role="Admin database")
+
+
 def validate_test_connection_safety(
     host,
     port,
     user,
     target_db,
+    admin_db=None,
     allowed_hosts_str=None,
     allowed_ports_str=None
 ):
     """
     Validate that the connection settings do not target a production database or cluster,
-    and strictly match approved test hosts and ports.
+    and strictly match approved test hosts, ports, and test database naming policies.
     Raises RuntimeError if unsafe.
     """
-    if not target_db or not target_db.startswith('test_'):
-        raise RuntimeError(f"Safety violation: Test database name '{target_db}' must begin with 'test_'.")
+    # 1. Validate target database name
+    validate_database_name_safety(target_db, role="Target test database")
 
-    if target_db.lower() in FORBIDDEN_DB_NAMES:
-        raise RuntimeError(f"Safety violation: Database name '{target_db}' is a protected production database.")
+    # 2. Validate admin database name if provided
+    if admin_db is not None:
+        validate_database_name_safety(admin_db, role="Admin database")
 
+    # 3. Validate user identity
     if user and user.lower() in FORBIDDEN_USERS:
         raise RuntimeError(f"Safety violation: Database user '{user}' matches production user identity.")
 
-    # Validate target host format
+    # 4. Validate target host format
     try:
         norm_host = normalize_host(host)
     except ValueError as e:
         raise RuntimeError(f"Safety violation: Malformed host '{host}': {e}") from e
 
-    # Validate target port format
+    # 5. Validate target port format
     try:
         norm_port = normalize_port(port)
     except ValueError as e:
         raise RuntimeError(f"Safety violation: Malformed port '{port}': {e}") from e
 
-    # Check host allowlist
+    # 6. Check host allowlist
     if allowed_hosts_str is None:
         allowed_hosts_str = os.getenv('PG_TEST_ALLOWED_HOSTS')
     if not allowed_hosts_str or not allowed_hosts_str.strip():
@@ -189,7 +229,7 @@ def validate_test_connection_safety(
             f"Safety violation: Target host '{host}' ({norm_host}) is not in approved test hosts: {sorted(approved_hosts)}."
         )
 
-    # Check port allowlist
+    # 7. Check port allowlist
     if allowed_ports_str is None:
         allowed_ports_str = os.getenv('PG_TEST_ALLOWED_PORTS')
     if not allowed_ports_str or not allowed_ports_str.strip():
@@ -204,6 +244,8 @@ def validate_test_connection_safety(
         raise RuntimeError(
             f"Safety violation: Target port '{port}' ({norm_port}) is not in approved test ports: {sorted(approved_ports)}."
         )
+
+    return norm_host, norm_port
 
 
 def safe_create_test_database(admin_conn, db_name):
@@ -490,7 +532,9 @@ class Migration0110SafetyGuardTests(TestCase):
     - Skipped by default unless explicitly opted in.
     - Requires all 5 connection parameters (including PG_TEST_ADMIN_DB without fallbacks).
     - Requires explicit allowlist variables (PG_TEST_ALLOWED_HOSTS, PG_TEST_ALLOWED_PORTS).
-    - Rejects production database names, users, and unapproved targets.
+    - Rejects production database names for both target_db and admin_db before any connection.
+    - Requires admin_db to follow explicit test-only naming policy (test_ prefix).
+    - Rejects production user identities and unapproved targets.
     - Rejects malformed host and port entries.
     - Enforces test-server isolation before making any connection attempt.
     - Safe cleanup closes both connections and reports failures without hiding test errors.
@@ -555,11 +599,13 @@ class Migration0110SafetyGuardTests(TestCase):
         # IP address match
         validate_test_connection_safety(
             '127.0.0.1', 5432, 'safe_tester', 'test_mig0110_abc',
+            admin_db='test_admin_db',
             allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
         )
         # Hostname match with different approved port
         validate_test_connection_safety(
             'test-pg.internal', 5433, 'safe_tester', 'test_mig0110_abc',
+            admin_db='test_admin_db',
             allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
         )
 
@@ -570,6 +616,7 @@ class Migration0110SafetyGuardTests(TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             validate_test_connection_safety(
                 '127.0.0.1', 5432, 'safe_tester', 'test_mig0110_abc',
+                admin_db='test_admin_db',
                 allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
             )
         self.assertIn("not in approved test hosts", str(ctx.exception))
@@ -581,6 +628,7 @@ class Migration0110SafetyGuardTests(TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             validate_test_connection_safety(
                 '127.0.0.1', 5432, 'safe_tester', 'test_mig0110_abc',
+                admin_db='test_admin_db',
                 allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
             )
         self.assertIn("not in approved test ports", str(ctx.exception))
@@ -595,6 +643,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError):
                 validate_test_connection_safety(
                     bad_host, 5432, 'safe_tester', 'test_sample',
+                    admin_db='test_admin_db',
                     allowed_hosts_str=valid_hosts, allowed_ports_str=valid_ports
                 )
 
@@ -603,6 +652,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError):
                 validate_test_connection_safety(
                     '127.0.0.1', bad_port, 'safe_tester', 'test_sample',
+                    admin_db='test_admin_db',
                     allowed_hosts_str=valid_hosts, allowed_ports_str=valid_ports
                 )
 
@@ -610,11 +660,13 @@ class Migration0110SafetyGuardTests(TestCase):
         with self.assertRaises(RuntimeError):
             validate_test_connection_safety(
                 '127.0.0.1', 5432, 'safe_tester', 'test_sample',
+                admin_db='test_admin_db',
                 allowed_hosts_str='127.0.0.1,,10.0.0.1', allowed_ports_str=valid_ports
             )
         with self.assertRaises(RuntimeError):
             validate_test_connection_safety(
                 '127.0.0.1', 5432, 'safe_tester', 'test_sample',
+                admin_db='test_admin_db',
                 allowed_hosts_str=valid_hosts, allowed_ports_str='5432, invalid_port'
             )
 
@@ -628,6 +680,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 validate_test_connection_safety(
                     '127.0.0.1', 5432, 'safe_tester', forbidden_db,
+                    admin_db='test_admin_db',
                     allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
                 )
             self.assertIn("Safety violation", str(ctx.exception))
@@ -637,6 +690,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 validate_test_connection_safety(
                     '127.0.0.1', 5432, forbidden_user, 'test_sample',
+                    admin_db='test_admin_db',
                     allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
                 )
             self.assertIn("matches production user identity", str(ctx.exception))
@@ -645,9 +699,67 @@ class Migration0110SafetyGuardTests(TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             validate_test_connection_safety(
                 'test-production-mirror.corp', 5432, 'safe_tester', 'test_sample',
+                admin_db='test_admin_db',
                 allowed_hosts_str=allowed_hosts, allowed_ports_str=allowed_ports
             )
         self.assertIn("not in approved test hosts", str(ctx.exception))
+
+    def test_production_admin_db_rejected_before_connect(self):
+        """Production or unapproved admin database names are rejected before psycopg2.connect() is called."""
+        forbidden_admin_dbs = [
+            'postgres', 'propanel_db', 'cardflow_db', 'production',
+            'prod', 'template1', 'template0', 'unprefixed_admin'
+        ]
+        for bad_admin_db in forbidden_admin_dbs:
+            clean_env = {
+                OPT_IN_ENV_VAR: '1',
+                'PG_TEST_HOST': '127.0.0.1',
+                'PG_TEST_PORT': '5432',
+                'PG_TEST_USER': 'safe_tester',
+                'PG_TEST_PASSWORD': 'dummy_password',
+                'PG_TEST_ADMIN_DB': bad_admin_db,
+                'PG_TEST_ALLOWED_HOSTS': '127.0.0.1',
+                'PG_TEST_ALLOWED_PORTS': '5432',
+            }
+            with mock.patch.dict(os.environ, clean_env, clear=True):
+                test_instance = Migration0110PostgresIntegrationTests()
+                with mock.patch('psycopg2.connect', side_effect=AssertionError("psycopg2.connect should not be called!")) as mock_conn:
+                    with self.assertRaises(RuntimeError) as ctx:
+                        test_instance.test_postgresql_fk_verification_and_replacement()
+                    self.assertIn("Safety violation: Admin database name", str(ctx.exception))
+                    mock_conn.assert_not_called()
+
+    def test_valid_dedicated_test_admin_db_accepted(self):
+        """Valid dedicated test admin databases (with test_ prefix and valid characters) pass validation."""
+        valid_admin_dbs = ['test_admin_db', 'test_postgres_admin', 'test_mig_admin']
+        for valid_db in valid_admin_dbs:
+            # Standalone validator
+            result = validate_admin_db_safety(valid_db)
+            self.assertEqual(result, valid_db)
+
+            # Combined connection safety validator
+            norm_host, norm_port = validate_test_connection_safety(
+                host='127.0.0.1',
+                port=5432,
+                user='safe_tester',
+                target_db='test_sample_db',
+                admin_db=valid_db,
+                allowed_hosts_str='127.0.0.1',
+                allowed_ports_str='5432'
+            )
+            self.assertEqual(norm_host, '127.0.0.1')
+            self.assertEqual(norm_port, 5432)
+
+    def test_admin_db_naming_policy_enforcement(self):
+        """Admin database naming policy strictly enforces non-empty, test_ prefix, and valid characters."""
+        invalid_admin_dbs = [
+            '', '   ', None, 'postgres', 'propanel_db', 'cardflow_db',
+            'production', 'admin_db', 'test-invalid-char!', 'test admin with spaces'
+        ]
+        for invalid_db in invalid_admin_dbs:
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_admin_db_safety(invalid_db)
+            self.assertIn("Safety violation: Admin database name", str(ctx.exception))
 
     def test_no_database_connection_attempted_when_validation_fails(self):
         """No database connection is attempted when safety validation fails."""
@@ -737,6 +849,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 validate_test_connection_safety(
                     '127.0.0.1', 5432, 'test_user', forbidden,
+                    admin_db='test_admin_db',
                     allowed_hosts_str='127.0.0.1', allowed_ports_str='5432'
                 )
             self.assertIn("Safety violation", str(ctx.exception))
@@ -746,6 +859,7 @@ class Migration0110SafetyGuardTests(TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             validate_test_connection_safety(
                 '127.0.0.1', 5432, 'test_user', 'my_custom_db',
+                admin_db='test_admin_db',
                 allowed_hosts_str='127.0.0.1', allowed_ports_str='5432'
             )
         self.assertIn("must begin with 'test_'", str(ctx.exception))
@@ -756,6 +870,7 @@ class Migration0110SafetyGuardTests(TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 validate_test_connection_safety(
                     '127.0.0.1', 5432, user, 'test_sample_db',
+                    admin_db='test_admin_db',
                     allowed_hosts_str='127.0.0.1', allowed_ports_str='5432'
                 )
             self.assertIn("matches production user identity", str(ctx.exception))
@@ -801,9 +916,11 @@ class Migration0110PostgresIntegrationTests(TestCase):
     - Requires all 5 explicit variables: PG_TEST_HOST, PG_TEST_PORT, PG_TEST_USER, PG_TEST_PASSWORD, PG_TEST_ADMIN_DB.
     - Requires explicit allowlist variables: PG_TEST_ALLOWED_HOSTS, PG_TEST_ALLOWED_PORTS.
     - Never uses hardcoded fallbacks or defaults (e.g. no default 'postgres' admin db, no default localhost/5432).
+    - Requires admin database to have test_ prefix and not match protected production database names.
     - Generates a random unique temporary database name: test_mig0110_<uuid>.
     - Verifies database does not already exist; never terminates connections or drops pre-existing databases.
-    - Validates target host and port against approved allowlist before any network connection.
+    - Validates target host, port, user, target_db, and admin_db against approved allowlist BEFORE any connection.
+    - Both admin and target connections use the identical validated host, port, and credentials.
     - Tracks created database and only drops that exact database in a finally block.
     - Safe cleanup closes both connections even if drop fails, reporting clear errors without hiding test failures.
     """
@@ -846,8 +963,14 @@ class Migration0110PostgresIntegrationTests(TestCase):
         # 4. Generate unique temporary database name
         test_db = f"test_mig0110_{uuid.uuid4().hex[:12]}"
 
-        # 5. Verify safety against production targets and validate allowlist BEFORE any connection
-        validate_test_connection_safety(pg_host, pg_port, pg_user, test_db)
+        # 5. Verify safety of host, port, user, target_db, AND admin_db BEFORE opening any connection
+        norm_host, norm_port = validate_test_connection_safety(
+            host=pg_host,
+            port=pg_port,
+            user=pg_user,
+            target_db=test_db,
+            admin_db=pg_admin_db
+        )
 
         admin_conn = None
         test_conn = None
@@ -855,13 +978,13 @@ class Migration0110PostgresIntegrationTests(TestCase):
         test_failed = False
 
         try:
-            # Connect to admin database
+            # Connect to admin database using validated host, port, user, and admin_db
             admin_conn = psycopg2.connect(
                 dbname=pg_admin_db,
                 user=pg_user,
                 password=pg_pass,
-                host=pg_host,
-                port=int(pg_port)
+                host=norm_host,
+                port=norm_port
             )
             admin_conn.autocommit = True
 
@@ -869,13 +992,13 @@ class Migration0110PostgresIntegrationTests(TestCase):
             safe_create_test_database(admin_conn, test_db)
             created_db_name = test_db
 
-            # Connect to the newly created test database
+            # Connect to the newly created test database using the exact same validated host, port, user
             test_conn = psycopg2.connect(
                 dbname=created_db_name,
                 user=pg_user,
                 password=pg_pass,
-                host=pg_host,
-                port=int(pg_port)
+                host=norm_host,
+                port=norm_port
             )
             test_conn.autocommit = True
             cur = test_conn.cursor()
