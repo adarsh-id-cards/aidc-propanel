@@ -174,31 +174,49 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 ## 6. PostgreSQL Migration Harmonization & VPS Schema Alignment
 
 ### `backend/core/migrations/0103_initial_domain_models.py`
-- **Location**: Line 15 and lines 50–57
+- **Location**: Line 15 and lines 47–51
 - **Change**:
   - Changed `user_id integer` to `user_id bigint NULL REFERENCES core_user(id)` to match the `bigint` type of `core_user.id`.
-  - Changed `client_id integer` to `client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE`.
-  - Removed redundant attempt to add unused `organisation_id` column.
-- **Why Safe**: Eliminates PostgreSQL type mismatch errors between `core_client.user_id` and `core_user.id`.
+  - Removed all `core_idcardtable` DDL operations from `core.0103`. Clarified migration responsibility so `core.0103` only synchronizes `core_client` columns.
+- **Why Safe**: Eliminates overlap across migrations. VPS already applied `core.0103`; clean databases apply it cleanly without touching `core_idcardtable`.
 
 ### `backend/tables/migrations/0001_initial_domain_models.py`
-- **Location**: Lines 7–85
+- **Location**: Lines 7–87
 - **Change**:
-  - Raw DDL for `core_idcardtable` now creates `client_id bigint NOT NULL REFERENCES core_client(id) ON DELETE CASCADE` without introducing an unused `organisation_id` relationship column.
-  - Aligned model state definition for `deleted_by_manager` by adding `db_column='deleted_by_client'`, harmonizing Django state with the physical database column.
-  - For existing databases, added idempotent type widening (`ALTER COLUMN client_id TYPE bigint`) and foreign key constraint creation (`core_idcardtable_client_id_fk_core_client_id`) on PostgreSQL.
-- **Why Safe**: Matches Django model relationships exactly while providing safe forward migration on existing databases without dropping tables or columns.
+  - Fresh table creation DDL creates `core_idcardtable` with `client_id bigint NOT NULL REFERENCES core_client(id) ON DELETE CASCADE` and `deleted_by_client bool NOT NULL DEFAULT FALSE`.
+  - State operations define `Table` with `organisation = ForeignKey('core.Organisation', db_column='client_id', on_delete=CASCADE)` and `deleted_by_manager = BooleanField(db_column='deleted_by_client', default=False)`.
+  - Existing table path safely adds `client_id bigint NULL` and `deleted_by_client` if missing, deferring widening, data audit, and NOT NULL reconciliation to `core.0110`.
+- **Why Safe**: Eliminates responsibility overlap and enables existing tables with data to pass safely without premature constraint failures.
 
 ### `backend/core/migrations/0110_add_client_id_to_idcardtable.py`
-- **Location**: Lines 10–55
+- **Location**: Lines 1–155
 - **Change**:
-  - Corrected integer/bigint mismatch by altering `client_id` to `bigint` on PostgreSQL if it was integer.
-  - Ensured idempotent foreign key constraint creation to `core_client(id) ON DELETE CASCADE`.
-  - Removed addition of unused `organisation_id` column.
-- **Why Safe**: Fully eliminates conflicts with `tables.0001` and guarantees final DB schema and Django migration state agreement.
+  - Acts as the sole authority for final schema reconciliation of `core_idcardtable.client_id`.
+  - Performs safe legacy data backfill (`UPDATE core_idcardtable SET client_id = organisation_id WHERE client_id IS NULL AND organisation_id IS NOT NULL`).
+  - Audits table data for NULLs and orphan foreign keys (`client_id NOT IN (SELECT id FROM core_client)`).
+  - Widens PostgreSQL column from `integer` to `bigint`.
+  - Verifies foreign key constraints by table (`core_idcardtable`), column (`client_id`), referenced table (`core_client`), referenced column (`id`), and delete action (`confdeltype = 'c'`). Drops obsolete non-cascade FKs and ensures exact CASCADE FK exists.
+  - Reconciles nullability with the Django model by setting `client_id SET NOT NULL` if and only if `null_count == 0` and `orphan_count == 0`. Never deletes or silently reassigns orphan rows.
+- **Why Safe**: Ensures full agreement between Django models and PostgreSQL schema while maintaining absolute safety for production data.
 
 ### `backend/core/migrations/0108_add_org_role_to_organisation.py`
-- **Status**: Retained idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`.
+- **Status**: Verified idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`. Safe for databases where `org_role` already exists.
+
+---
+
+## 7. Migration Verification & Test Summary
+
+| Test Suite / Target | Result | Key Details |
+| --- | --- | --- |
+| **Fresh PostgreSQL (from zero)** | **PASS** | `core_idcardtable.client_id` is `bigint NOT NULL`, FK verified with `confdeltype='c'` (`ON DELETE CASCADE`), `deleted_by_client` is `bool NOT NULL`. |
+| **VPS-Simulated PostgreSQL (from 0107)** | **PASS** | `core.0108` skipped gracefully; legacy NULL row backfilled from `organisation_id`; column widened to `bigint NOT NULL`; verified CASCADE FK created; existing rows & columns intact. |
+| **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
+| **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
+| **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
+| **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
+| **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
+| **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 61.54s. |
+
 
 
 

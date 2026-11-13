@@ -46,32 +46,6 @@ def sync_tables_schema(apps, schema_editor):
                     cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
                 else:
                     cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
-            elif connection.vendor == 'postgresql':
-                cursor.execute("""
-                    SELECT data_type FROM information_schema.columns
-                    WHERE table_name = 'core_idcardtable' AND column_name = 'client_id'
-                """)
-                row = cursor.fetchone()
-                if row and row[0].lower() in ('integer', 'int4'):
-                    cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id TYPE bigint")
-                constraints = connection.introspection.get_constraints(cursor, 'core_idcardtable')
-                has_fk = any(
-                    c.get('foreign_key') == ('core_client', 'id') and 'client_id' in c.get('columns', [])
-                    for c in constraints.values()
-                )
-                if not has_fk:
-                    cursor.execute("""
-                        DO $$
-                        BEGIN
-                            IF NOT EXISTS (
-                                SELECT 1 FROM pg_constraint WHERE conname = 'core_idcardtable_client_id_fk_core_client_id'
-                            ) THEN
-                                ALTER TABLE core_idcardtable
-                                    ADD CONSTRAINT core_idcardtable_client_id_fk_core_client_id
-                                    FOREIGN KEY (client_id) REFERENCES core_client(id) ON DELETE CASCADE;
-                            END IF;
-                        END $$;
-                    """)
 
             if 'deleted_by_client' not in columns:
                 if 'deleted_by_manager' in columns:

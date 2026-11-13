@@ -47,12 +47,6 @@ def sync_core_client_columns(apps, schema_editor):
             if col_name.lower() not in existing:
                 cursor.execute(sql)
 
-        tables = {t.lower() for t in connection.introspection.table_names(cursor)}
-        if 'core_idcardtable' in tables:
-            tbl_cols = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')}
-            if 'client_id' not in tbl_cols:
-                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
-
 
 class Migration(migrations.Migration):
 
