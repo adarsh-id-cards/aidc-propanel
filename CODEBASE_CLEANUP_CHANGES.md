@@ -189,15 +189,29 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 - **Why Safe**: Eliminates responsibility overlap and enables existing tables with data to pass safely without premature constraint failures.
 
 ### `backend/core/migrations/0110_add_client_id_to_idcardtable.py`
-- **Location**: Lines 1–155
+- **Location**: Lines 1–190
 - **Change**:
   - Acts as the sole authority for final schema reconciliation of `core_idcardtable.client_id`.
-  - Performs safe legacy data backfill (`UPDATE core_idcardtable SET client_id = organisation_id WHERE client_id IS NULL AND organisation_id IS NOT NULL`).
-  - Audits table data for NULLs and orphan foreign keys (`client_id NOT IN (SELECT id FROM core_client)`).
+  - Performs safe legacy data backfill without overwriting non-NULL values, reporting affected row counts separately for `organisation_id` and `group_id`.
+  - Audits table data for ambiguity: if candidate sources conflict (`organisation_id <> group.client_id`), raises a descriptive exception with conflict details rather than guessing.
+  - Audits table data for NULLs and orphan foreign keys (`client_id NOT IN (SELECT id FROM core_client)`). If any remain, raises a clear `RuntimeError` with exact counts, sample IDs, and administrator remediation instructions; never silently succeeds with an incomplete schema.
   - Widens PostgreSQL column from `integer` to `bigint`.
-  - Verifies foreign key constraints by table (`core_idcardtable`), column (`client_id`), referenced table (`core_client`), referenced column (`id`), and delete action (`confdeltype = 'c'`). Drops obsolete non-cascade FKs and ensures exact CASCADE FK exists.
+  - Verifies foreign key constraints with exact catalog matching: source table, schema, source column, referenced table, referenced schema, referenced column, single-column cardinality, `confdeltype = 'c'` (`ON DELETE CASCADE`), and `convalidated = True`. Replaces non-CASCADE or invalid FKs idempotently while avoiding dropping unrelated constraints.
   - Reconciles nullability with the Django model by setting `client_id SET NOT NULL` if and only if `null_count == 0` and `orphan_count == 0`. Never deletes or silently reassigns orphan rows.
-- **Why Safe**: Ensures full agreement between Django models and PostgreSQL schema while maintaining absolute safety for production data.
+- **Why Safe**: Guarantees complete schema agreement between Django models and PostgreSQL/SQLite databases with zero data loss and safe re-running after data remediation.
+
+### `backend/core/test_migration_0110.py`
+- **Location**: Entire file
+- **Action**: Dedicated unit and integration test suite covering:
+  1. NULL rows successfully backfilled from `organisation_id`.
+  2. NULL rows successfully backfilled from `group_id`.
+  3. Non-overwriting of existing valid `client_id`.
+  4. Migration fails fast with clear remediation instructions when NULL rows have no valid source.
+  5. Migration fails fast with clear remediation instructions when orphan references exist.
+  6. Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
+  7. Migration re-runs safely and succeeds after administrator data remediation (idempotent).
+  8. SQLite existing-table path compatibility.
+  9. PostgreSQL exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation.
 
 ### `backend/core/migrations/0108_add_org_role_to_organisation.py`
 - **Status**: Verified idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`. Safe for databases where `org_role` already exists.
@@ -208,14 +222,16 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 
 | Test Suite / Target | Result | Key Details |
 | --- | --- | --- |
-| **Fresh PostgreSQL (from zero)** | **PASS** | `core_idcardtable.client_id` is `bigint NOT NULL`, FK verified with `confdeltype='c'` (`ON DELETE CASCADE`), `deleted_by_client` is `bool NOT NULL`. |
-| **VPS-Simulated PostgreSQL (from 0107)** | **PASS** | `core.0108` skipped gracefully; legacy NULL row backfilled from `organisation_id`; column widened to `bigint NOT NULL`; verified CASCADE FK created; existing rows & columns intact. |
+| **Fresh PostgreSQL (from zero)** | **PASS** | `core_idcardtable.client_id` is `bigint NOT NULL`, FK verified with `confdeltype='c'` (`ON DELETE CASCADE`), `convalidated=True`, `deleted_by_client` is `bool NOT NULL`. |
+| **VPS-Simulated PostgreSQL (from 0107)** | **PASS** | `core.0108` skipped duplicate column; legacy NULL row backfilled; column widened to `bigint NOT NULL`; verified CASCADE FK created; existing rows & `organisation_id` intact. |
 | **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
 | **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
 | **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
+| **Migration 0110 Comprehensive Tests (`pytest core/test_migration_0110.py`)** | **PASS** | 9 passed in 2.71s (covers NULL backfill, no valid source failure, orphan failure, ambiguous ownership, remediation re-run, SQLite path, and PostgreSQL FK replacement). |
 | **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
 | **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
-| **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 61.54s. |
+| **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 62.83s. |
+
 
 
 
