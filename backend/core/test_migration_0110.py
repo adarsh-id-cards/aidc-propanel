@@ -596,6 +596,34 @@ class Migration0110UnitTests(TestCase):
         self.cur.execute("SELECT client_id FROM core_idcardtable WHERE id = 90;")
         self.assertEqual(self.cur.fetchone()[0], 1)
 
+    def test_both_deleted_by_manager_and_deleted_by_client_coexist_safely(self):
+        """When both deleted_by_manager and deleted_by_client exist, migration preserves both without data loss."""
+        # Recreate table with both columns present with distinct values
+        self.cur.execute("DROP TABLE core_idcardtable;")
+        self.cur.execute("""
+            CREATE TABLE core_idcardtable (
+                id integer PRIMARY KEY AUTOINCREMENT,
+                name varchar(255) NOT NULL,
+                client_id bigint NOT NULL,
+                deleted_by_manager bool NOT NULL DEFAULT 0,
+                deleted_by_client bool NOT NULL DEFAULT 1
+            );
+        """)
+        self.cur.execute(
+            "INSERT INTO core_idcardtable (id, name, client_id, deleted_by_manager, deleted_by_client) "
+            "VALUES (1, 'Legacy Coexistence', 1, 0, 1);"
+        )
+        self.conn.commit()
+
+        # Migration runs cleanly without errors
+        reconcile_idcardtable_client_id(None, self.schema_editor)
+
+        # Both columns still exist and keep their distinct data
+        self.cur.execute("SELECT deleted_by_manager, deleted_by_client FROM core_idcardtable WHERE id = 1;")
+        row = self.cur.fetchone()
+        self.assertEqual(row[0], 0, "deleted_by_manager value must be preserved")
+        self.assertEqual(row[1], 1, "deleted_by_client value must be preserved")
+
 
 class Migration0110PostgresOfflineMockTests(TestCase):
     """
@@ -604,7 +632,8 @@ class Migration0110PostgresOfflineMockTests(TestCase):
     - Incompatible / non-CASCADE FK dropped before integer-to-bigint alteration
     - Column widened to bigint
     - Cascade FK added and independently verified
-    - Independent verification raises error if FK not verified in catalog
+    - Independent verification raises error if FK not verified in catalog or fails criteria
+    - Composite FK detected and fails fast before altering column
     - Multi-schema isolation: CURRENT_SCHEMA restriction prevents foreign schemas from leaking
     """
 
@@ -614,7 +643,8 @@ class Migration0110PostgresOfflineMockTests(TestCase):
 
         class MockCursor:
             def __init__(self):
-                self.fks = [('old_restrict_fk', 'r', True, 'core_client', 'id')]
+                # (conname, confdeltype, convalidated, src_col_count, ref_col_count, ref_schema, ref_table, ref_col, condef)
+                self.fks = [('old_restrict_fk', 'r', True, 1, 1, 'public', 'core_client', 'id', 'FOREIGN KEY (client_id) REFERENCES core_client(id) ON DELETE RESTRICT')]
                 self.col_info = ('integer', 'YES')
                 self.fk_verified = False
 
@@ -625,6 +655,10 @@ class Migration0110PostgresOfflineMockTests(TestCase):
 
             def fetchone(self):
                 last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "CURRENT_SCHEMA" in last_sql and "SELECT CURRENT_SCHEMA" in last_sql:
+                    return ('public',)
+                if "FROM PG_ATTRIBUTE" in last_sql:
+                    return (1,)  # client_id attnum
                 if "COUNT(*)" in last_sql:
                     return (0,)
                 if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
@@ -637,7 +671,8 @@ class Migration0110PostgresOfflineMockTests(TestCase):
                 last_sql = executed_sqls[-1].upper() if executed_sqls else ""
                 if "FROM PG_CONSTRAINT" in last_sql:
                     if self.fk_verified:
-                        return [('core_idcardtable_client_id_fk_core_client_id', 'c', True)]
+                        # (conname, src_schema, src_table, src_col, src_col_count, ref_schema, ref_table, ref_col, ref_col_count, confdeltype, convalidated)
+                        return [('core_idcardtable_client_id_fk_core_client_id', 'public', 'core_idcardtable', 'client_id', 1, 'public', 'core_client', 'id', 1, 'c', True)]
                     return self.fks
                 return []
 
@@ -698,6 +733,10 @@ class Migration0110PostgresOfflineMockTests(TestCase):
 
             def fetchone(self):
                 last_sql = self.executed[-1].upper() if self.executed else ""
+                if "CURRENT_SCHEMA" in last_sql and "SELECT CURRENT_SCHEMA" in last_sql:
+                    return ('public',)
+                if "FROM PG_ATTRIBUTE" in last_sql:
+                    return (1,)
                 if "COUNT(*)" in last_sql:
                     return (0,)
                 if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
@@ -736,6 +775,136 @@ class Migration0110PostgresOfflineMockTests(TestCase):
             reconcile_idcardtable_client_id(None, schema_editor)
 
         self.assertIn("Foreign key verification failed", str(ctx.exception))
+
+    def test_composite_fk_detected_and_fails_before_altering_column(self):
+        """When a composite FK involving client_id exists, migration detects it and fails before altering column."""
+        executed_sqls = []
+
+        class MockCompositeFKCursor:
+            def __init__(self):
+                self.col_info = ('integer', 'YES')
+
+            def execute(self, sql, params=None):
+                executed_sqls.append(sql.strip())
+
+            def fetchone(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "CURRENT_SCHEMA" in last_sql and "SELECT CURRENT_SCHEMA" in last_sql:
+                    return ('public',)
+                if "FROM PG_ATTRIBUTE" in last_sql:
+                    return (1,)  # client_id attnum
+                if "COUNT(*)" in last_sql:
+                    return (0,)
+                if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
+                    return self.col_info
+                return None
+
+            def fetchall(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "FROM PG_CONSTRAINT" in last_sql:
+                    # Return composite FK (src_col_count = 2)
+                    return [('composite_sample_fk', 'c', True, 2, 2, 'public', 'core_client', None, 'FOREIGN KEY (client_id, extra_id) REFERENCES core_client(id, extra_id)')]
+                return []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        mock_conn = SimpleNamespace(
+            cursor=lambda: MockCompositeFKCursor(),
+            vendor='postgresql',
+            introspection=SimpleNamespace(
+                table_names=lambda c: ['core_idcardtable', 'core_client'],
+                get_table_description=lambda c, t: [
+                    SimpleNamespace(name='id'),
+                    SimpleNamespace(name='name'),
+                    SimpleNamespace(name='client_id'),
+                    SimpleNamespace(name='deleted_by_client'),
+                ]
+            )
+        )
+        schema_editor = SimpleNamespace(connection=mock_conn)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            reconcile_idcardtable_client_id(None, schema_editor)
+
+        err_msg = str(ctx.exception)
+        self.assertIn("Cannot automatically reconcile composite foreign key 'composite_sample_fk'", err_msg)
+        self.assertIn("FOREIGN KEY (client_id, extra_id)", err_msg)
+
+        # Confirm that NO column widening or constraint dropping was executed
+        for sql in executed_sqls:
+            self.assertNotIn("ALTER COLUMN client_id TYPE bigint", sql)
+            self.assertNotIn("DROP CONSTRAINT", sql)
+
+    def test_post_creation_verification_specific_condition_diagnostics(self):
+        """When post-creation verification fails on specific catalog conditions, detailed diagnostics are raised."""
+        executed_sqls = []
+
+        class MockDefectiveCatalogCursor:
+            def __init__(self):
+                self.col_info = ('bigint', 'NO')
+                self.added_constraint = False
+
+            def execute(self, sql, params=None):
+                executed_sqls.append(sql.strip())
+                if 'ADD CONSTRAINT' in sql.upper():
+                    self.added_constraint = True
+
+            def fetchone(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "CURRENT_SCHEMA" in last_sql and "SELECT CURRENT_SCHEMA" in last_sql:
+                    return ('public',)
+                if "FROM PG_ATTRIBUTE" in last_sql:
+                    return (1,)
+                if "COUNT(*)" in last_sql:
+                    return (0,)
+                if "FROM INFORMATION_SCHEMA.COLUMNS" in last_sql:
+                    return self.col_info
+                if "SELECT C.CONNAME FROM PG_CONSTRAINT" in last_sql:
+                    return None
+                return None
+
+            def fetchall(self):
+                last_sql = executed_sqls[-1].upper() if executed_sqls else ""
+                if "FROM PG_CONSTRAINT" in last_sql:
+                    if self.added_constraint:
+                        # Return constraint with defective properties: wrong ref table ('other_table'), non-CASCADE ('r'), unvalidated (False)
+                        return [('defective_fk', 'public', 'core_idcardtable', 'client_id', 1, 'public', 'other_table', 'id', 1, 'r', False)]
+                    return []
+                return []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        mock_conn = SimpleNamespace(
+            cursor=lambda: MockDefectiveCatalogCursor(),
+            vendor='postgresql',
+            introspection=SimpleNamespace(
+                table_names=lambda c: ['core_idcardtable', 'core_client'],
+                get_table_description=lambda c, t: [
+                    SimpleNamespace(name='id'),
+                    SimpleNamespace(name='name'),
+                    SimpleNamespace(name='client_id'),
+                    SimpleNamespace(name='deleted_by_client'),
+                ]
+            )
+        )
+        schema_editor = SimpleNamespace(connection=mock_conn)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            reconcile_idcardtable_client_id(None, schema_editor)
+
+        err_msg = str(ctx.exception)
+        self.assertIn("Foreign key verification failed", err_msg)
+        self.assertIn("referenced table 'other_table' != 'core_client'", err_msg)
+        self.assertIn("confdeltype 'r' != 'c' (CASCADE)", err_msg)
+        self.assertIn("convalidated is False", err_msg)
 
 
 class Migration0110SafetyGuardTests(TestCase):

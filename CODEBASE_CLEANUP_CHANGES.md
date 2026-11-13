@@ -231,9 +231,10 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
      - If database creation fails, cleanup stops without attempting to drop anything.
      - Safe cleanup guarantees both test and admin connections are closed even if database drop fails. Emits clear errors with database name and exception details to stderr and logger without masking original test failures.
      - Never uses `DROP DATABASE IF EXISTS` or `pg_terminate_backend`.
-  5. **Isolated SQLite Unit Tests (12 tests, Zero Credentials)**: Fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
+  5. **Isolated SQLite Unit Tests (13 tests, Zero Credentials)**: Fast unit tests running against isolated in-memory SQLite connections (`sqlite3.connect(':memory:')`), verifying:
      - Empty existing table (verified VPS baseline) completes cleanly.
      - `deleted_by_manager` safely renamed to `deleted_by_client` without data loss.
+     - Coexistence safety: when both `deleted_by_manager` and `deleted_by_client` already exist, migration preserves both columns and distinct values without data loss.
      - Missing group table skipped safely.
      - Missing `group.client_id` column skipped safely with diagnostic warning.
      - NULL rows successfully backfilled from `organisation_id`.
@@ -244,7 +245,7 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
      - Migration fails fast when candidate sources are ambiguous (`organisation_id != group.client_id`).
      - Migration re-runs safely and succeeds after administrator data remediation (idempotent retry).
      - SQLite existing-table path compatibility.
-  6. **PostgreSQL Offline Mock Tests (2 tests)**: Verifies DDL ordering (dropping non-cascade FKs before column type widening), schema-specific query generation (`table_schema = CURRENT_SCHEMA`, `nspname = CURRENT_SCHEMA`), and post-creation FK independent catalog verification failure reporting.
+  6. **PostgreSQL Offline Mock Tests (4 tests)**: Verifies DDL ordering (dropping non-cascade FKs before column type widening), schema-specific query generation (`table_schema = CURRENT_SCHEMA`, `nspname = CURRENT_SCHEMA`), composite foreign key detection and fast-fail before column alteration, and complete post-creation FK independent catalog verification with detailed per-condition failure reporting.
   7. **Safety Guard Tests (20 tests)**: Verifies default skip behavior, missing credential rejection, missing allowlist rejection, approved host/port validation, unapproved host rejection, unapproved port rejection, malformed host/port rejection, production setting rejection under isolated server policy, production admin DB rejection before connection, valid test admin DB acceptance, admin DB naming policy enforcement, no connection attempt when validation fails, cleanup failure reporting with connection closure, refusal to drop when creation fails, production DB/user protection, and refusal to overwrite pre-existing databases.
   8. **Opt-In PostgreSQL Integration Test**: Verifies exact FK verification, replacement of non-CASCADE FK with validated CASCADE FK, and final `bigint NOT NULL` schema validation on an approved, isolated disposable PostgreSQL test server.
 
@@ -262,7 +263,7 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 | **Repeated Migrate (PostgreSQL & SQLite)** | **PASS** | `No migrations to apply` on all runs. Fully idempotent. |
 | **Clean SQLite Migration (from zero)** | **PASS** | All migrations applied cleanly from 0001 to latest without DDL errors. |
 | **Existing-Table SQLite Migration** | **PASS** | Migrated to 0107, simulated existing table columns/rows, migrated to latest, backfilled client_id cleanly without PostgreSQL-specific DDL syntax errors. |
-| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **34 passed, 1 skipped in 0.22s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
+| **Default Test Suite (`pytest core/test_migration_0110.py`)** | **PASS** | **37 passed, 1 skipped in 0.28s**. Runs 100% offline without PostgreSQL credentials. Integration test skipped by default. |
 | **Django System Check (`python manage.py check`)** | **PASS** | Identified 0 issues (0 silenced). |
 | **Django Migrations Check (`makemigrations --check --dry-run`)** | **PASS** | `No changes detected`. Django models and migrations in 100% agreement. |
 | **Pytest Suite (`pytest tables/`)** | **PASS** | 52 passed in 62.83s. |
