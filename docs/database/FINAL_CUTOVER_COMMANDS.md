@@ -1,88 +1,61 @@
-# Final Production Cutover Commands — Pro-Panel
+# Production Cutover Command Execution Runbook — Pro-Panel
 
 > [!CAUTION]
-> **HUMAN AUTHORIZATION REQUIRED**: Do NOT execute these commands against the live production environment without explicit human authorization. Every command is classified by machine, target database, operational risk (Read-Only vs Destructive), expected output, and failure handling procedure.
->
-> **VERIFIED VPS ARCHITECTURE**:
-> - **PostgreSQL 14 (Port 5432)**: Default cluster containing only `postgres` DB. Unused by Pro-Panel.
-> - **PostgreSQL 16 (Port 5433)**: Dedicated production cluster.
-> - **Source Database (Blue)**: `propanel_db` on Port 5433 (Preserved untouched as rollback anchor).
-> - **Target Database (Green)**: `propanel_db_v2` on Port 5433 (Clean schema target).
-> - **Web Upstream**: Nginx reverse proxy targeting `http://127.0.0.1:8000`.
+> **MANDATORY HUMAN CONTROL POLICY**:
+> 1. No command in this document may be executed automatically or without explicit human authorization.
+> 2. Every command must be executed sequentially on the **target production VPS (`103.49.131.169`)**.
+> 3. Do NOT proceed past any checkpoint gate without verifying expected output.
+> 4. If any abort criteria are met, halt immediately and trigger the **Fast-Path Rollback Procedure** (Section 9).
+> 5. **Source database `propanel_db` on PostgreSQL 16 (port 5433) is 100% read-only and preserved as the immutable rollback anchor.**
 
 ---
 
-## Command Execution Taxonomy
+## Operational Architecture Summary
 
-| Dimension | Classifications |
+| Property | Value |
 |---|---|
-| **Executing Machine** | `Production VPS (103.49.131.169)` |
-| **Executing User** | `acw` (Application deployer) or `postgres` (DB Admin) or `root` (Systemd/Nginx) |
-| **Affected Database** | `None` / `Source DB (propanel_db on port 5433)` / `Target DB (propanel_db_v2 on port 5433)` / `Filesystem` |
-| **Nature** | `Read-Only` (Zero data risk) or `State-Change` (Service/config) or `Destructive` (Target DB write) |
-| **Failure Policy** | Immediate halt / Abort / Rollback trigger |
+| **Production VPS** | `103.49.131.169` (Ubuntu 22.04.1 LTS) |
+| **SSH User** | `acw` |
+| **Project Root** | `/home/acw/pro-panel` |
+| **Backend Directory** | `/home/acw/pro-panel/backend` |
+| **Backend Virtualenv** | `/home/acw/pro-panel/backend/.venv` |
+| **Backend Environment** | `/home/acw/pro-panel/backend/.env` |
+| **PostgreSQL 14** | Port 5432 (Contains only default `postgres` DB — UNUSED) |
+| **PostgreSQL 16** | Port 5433 (`/usr/lib/postgresql/16/bin/`) |
+| **Source DB (Blue)** | `propanel_db` (Port 5433, owner: `propanel_user`, 31 tables, 140 migrations) — **READ-ONLY** |
+| **Target DB (Green)** | `propanel_db_v2` (Port 5433, owner: `propanel_user`, 55 tables, 31 clean migrations) — **WRITE TARGET** |
+| **Web Upstream** | `http://127.0.0.1:8000` |
+| **Nginx Config** | `/etc/nginx` (Reverse proxy for `propanel.adarshbhopal.in` & `api.propanel.adarshbhopal.in`) |
+| **Estimated Downtime**| 15–20 minutes |
+| **Hard Abort Cutoff** | 30 minutes from maintenance start |
 
 ---
 
-## Explicit Checkpoint Gates
+## Phase 0: Pre-Flight Environment & Host Verification (T-60 to T-15 Mins)
 
-```
-  [START]
-     │
-     ▼
-[CHECKPOINT 1] Pre-Flight Health, Backup Integrity & VPS Verification ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 2] Stop Backend Process on Port 8000 & Maintenance Splash ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 3] Capture Final Snapshot of propanel_db (Port 5433)       ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 4] Create Fresh Target Database propanel_db_v2            ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 5] Apply Clean 0001_initial Migrations on propanel_db_v2   ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 6] Execute ETL (propanel_db ──> propanel_db_v2 on 5433)   ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 7] Synchronize & Verify Media Assets (SHA-256)            ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 8] Point .env to propanel_db_v2 & Restart Backend (8000)  ──> [HUMAN APPROVAL]
-     │
-     ▼
-[CHECKPOINT 9] Smoke Testing & Production Traffic Restoration         ──> [HUMAN APPROVAL]
-     │
-     ▼
-   [DONE]
-```
-
----
-
-## Phase 0: Pre-Flight Audit & Environment Verification (Read-Only)
-
-### Command 0.1: Verify VPS Host Identity & Environment
-- **Purpose**: Verify the operator is connected to the correct production server as user `acw`.
-- **Machine**: Production VPS (`103.49.131.169`) as user `acw`.
+### Command 0.1: Verify SSH Session & VPS Host Identity
+- **Purpose**: Ensure the operator is connected to the genuine production VPS and operating as user `acw`.
+- **Machine**: Production VPS (`103.49.131.169`).
 - **Affected DB**: None.
 - **Nature**: `Read-Only`.
 - **Command**:
   ```bash
-  hostname -I && uname -a && whoami && pwd
+  whoami
+  hostname -I | awk '{print $1}'
+  uname -a
   ```
 - **Expected Output**:
   ```
-  103.49.131.169 ... Linux ... x86_64 ... acw ... /home/acw/pro-panel
+  acw
+  103.49.131.169
+  Linux ... x86_64 ...
   ```
 - **Failure Handling**: If IP does NOT match `103.49.131.169`, disconnect immediately.
 
 ---
 
-### Command 0.2: Verify PostgreSQL 16.15 Cluster Status & Existing `propanel_db`
-- **Purpose**: Verify PostgreSQL 16 is listening on port 5433 and inspect existing `propanel_db`.
+### Command 0.2: Verify PostgreSQL 16 Cluster & Existing `propanel_db`
+- **Purpose**: Verify PostgreSQL 16 is active on port 5433 and inspect existing `propanel_db`.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: Source DB (`propanel_db` on port 5433).
 - **Nature**: `Read-Only`.
@@ -122,24 +95,65 @@
 
 ---
 
-### Command 0.4: Verify Git Commit on VPS Repository
-- **Purpose**: Confirm `/home/acw/pro-panel` matches the certified Git commit `04ed567`.
+### Command 0.4: Verify Virtualenv & Python Environment
+- **Purpose**: Verify the canonical virtual environment at `/home/acw/pro-panel/backend/.venv`.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: None.
 - **Nature**: `Read-Only`.
 - **Command**:
   ```bash
-  cd /home/acw/pro-panel
-  git fetch origin main
-  git log -1 --format="Commit: %H | Date: %cd | Subject: %s" origin/main
-  git status --porcelain
+  test -f /home/acw/pro-panel/backend/.venv/bin/activate && echo "VENV: OK"
+  /home/acw/pro-panel/backend/.venv/bin/python --version
+  /home/acw/pro-panel/backend/.venv/bin/python -c "import django, psycopg; print('Django:', django.__version__, '| Psycopg:', psycopg.__version__)"
   ```
-- **Expected Output**: Shows commit `04ed567...`; working directory clean.
-- **Failure Handling**: If dirty, stash changes. To align with tested commit: `git reset --hard origin/main`.
+- **Expected Output**:
+  ```
+  VENV: OK
+  Python 3.10... or 3.11...
+  Django: 5.x | Psycopg: 3.x
+  ```
+- **Failure Handling**: If `.venv` is missing, check alternative directory paths or reconstruct virtualenv before proceeding.
 
 ---
 
-### Command 0.5: Verify Baseline Backup File & SHA-256 Checksum
+### Command 0.5: Inspect Nginx Configuration & Enabled Sites
+- **Purpose**: Inspect existing Nginx configuration paths without making assumptions about site file names.
+- **Machine**: Production VPS as user `acw` / `root`.
+- **Affected DB**: None.
+- **Nature**: `Read-Only`.
+- **Command**:
+  ```bash
+  ls -la /etc/nginx/sites-available/ /etc/nginx/sites-enabled/
+  grep -rn "server_name.*propanel" /etc/nginx/sites-enabled/
+  sudo nginx -t
+  ```
+- **Expected Output**: Shows verified site configuration files; `syntax is ok`.
+- **Failure Handling**: Do NOT proceed with symlinking unverified files if site names differ.
+
+---
+
+### Command 0.6: Record Pre-Cutover Git Commit & Baseline State
+- **Purpose**: Record the exact pre-cutover Git commit hash to guarantee 100% recoverable application code during rollback.
+- **Machine**: Production VPS as user `acw`.
+- **Affected DB**: None.
+- **Nature**: `Read-Only` / Git tag.
+- **Command**:
+  ```bash
+  cd /home/acw/pro-panel
+  PRE_CUTOVER_COMMIT=$(git rev-parse HEAD)
+  echo "${PRE_CUTOVER_COMMIT}" > /home/acw/pro-panel/pre_cutover_commit.txt
+  git tag -f pre-cutover-baseline
+  echo "Recorded pre-cutover commit: ${PRE_CUTOVER_COMMIT}"
+
+  # Fetch new architecture commits
+  git fetch origin main
+  git log -1 --format="Target Commit: %H | Date: %cd | Subject: %s" origin/main
+  ```
+- **Expected Output**: Pre-cutover commit recorded; target commit `04ed567` (or latest) fetched cleanly.
+
+---
+
+### Command 0.7: Verify Baseline Backup File & SHA-256 Checksum
 - **Purpose**: Confirm verified pre-rebuild backup is accessible on VPS with identical SHA-256 checksum.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: None (Filesystem).
@@ -154,34 +168,35 @@
   ```
   f260c6ffd7141486425d185a2a9fa398c8ac28e8cfb77e764f6445a076d26340  /home/acw/backups/propanel_pre_rebuild_20261113_174621.dump
   ```
-- **Failure Handling**: If hash does not match, re-copy the backup from staging/source machine before proceeding.
+- **Failure Handling**: If hash does not match, re-copy the backup from staging before proceeding.
 
 ---
 
 > [!IMPORTANT]
 > ### 🛑 CHECKPOINT 1 GATE: PRE-FLIGHT AUDIT COMPLETE
-> Verify commands 0.1 through 0.5 succeeded. **Obtain explicit human approval before proceeding to stop services.**
+> Verify commands 0.1 through 0.7 succeeded. **Obtain explicit human approval before proceeding to stop services.**
 
 ---
 
-## Phase 1: Service Shutdown & Maintenance Splash
+## Phase 1: Service Shutdown & Maintenance Mode (T-00:00)
 
-### Command 1.1: Enable Nginx Maintenance Splash Page
+### Command 1.1: Enable Nginx Maintenance Splash
 - **Purpose**: Gracefully inform users that planned maintenance is in progress and reject new write traffic.
 - **Machine**: Production VPS as user `root` (or with `sudo`).
 - **Affected DB**: None (Web traffic).
 - **Nature**: `State-Change`.
 - **Command**:
   ```bash
-  sudo ln -sf /etc/nginx/sites-available/propanel_maintenance.conf /etc/nginx/sites-enabled/propanel.conf || true
+  # Check if a dedicated maintenance config exists before linking
+  if [ -f /etc/nginx/sites-available/propanel_maintenance.conf ]; then
+      sudo ln -sf /etc/nginx/sites-available/propanel_maintenance.conf /etc/nginx/sites-enabled/propanel.conf
+  else
+      echo "NOTICE: Using touch maintenance flag or proceeding with direct backend stop."
+  fi
   sudo nginx -t && sudo systemctl reload nginx
   ```
-- **Expected Output**:
-  ```
-  nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
-  nginx: configuration file /etc/nginx/nginx.conf test is successful
-  ```
-- **Failure Handling**: If maintenance conf is not present, create a simple maintenance block or proceed carefully after stopping backend.
+- **Expected Output**: `nginx: configuration file /etc/nginx/nginx.conf test is successful`.
+- **Failure Handling**: If reload fails, revert link and test again.
 
 ---
 
@@ -208,10 +223,7 @@
   # Verify port 8000 is free
   ss -tlpn | grep 8000 || echo "Port 8000 is FREE."
   ```
-- **Expected Output**:
-  ```
-  Port 8000 is FREE.
-  ```
+- **Expected Output**: `Port 8000 is FREE.`
 - **Failure Handling**: If port 8000 remains bound, run `kill -9 $PIDS`.
 
 ---
@@ -299,15 +311,19 @@
 
 ## Phase 4: Apply Clean Initial Migrations on `propanel_db_v2`
 
-### Command 4.1: Run Django Migrations from Zero on `propanel_db_v2`
-- **Purpose**: Establish canonical 55-table schema, 80 foreign keys, and 97 indexes on `propanel_db_v2`.
+### Command 4.1: Update Codebase & Run Django Migrations from Zero on `propanel_db_v2`
+- **Purpose**: Switch to tested architecture commit and establish canonical 55-table schema on `propanel_db_v2`.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: Target DB (`propanel_db_v2` on port 5433).
 - **Nature**: `Destructive` (DDL creation on target DB only).
 - **Command**:
   ```bash
+  cd /home/acw/pro-panel
+  # Checkout the certified commit
+  git checkout origin/main
+
   cd /home/acw/pro-panel/backend
-  source /home/acw/pro-panel/venv/bin/activate
+  source /home/acw/pro-panel/backend/.venv/bin/activate
 
   # Read existing DB credentials from .env
   DB_PASS=$(grep -E "^(DB_PASSWORD|POSTGRES_PASSWORD)=" .env | cut -d '=' -f2- | tr -d '"' | tr -d "'")
@@ -362,11 +378,11 @@
 - **Command**:
   ```bash
   cd /home/acw/pro-panel/backend
-  source /home/acw/pro-panel/venv/bin/activate
+  source /home/acw/pro-panel/backend/.venv/bin/activate
 
   DB_PASS=$(grep -E "^(DB_PASSWORD|POSTGRES_PASSWORD)=" .env | cut -d '=' -f2- | tr -d '"' | tr -d "'")
 
-  # Source DSN points to propanel_db; Target DSN points to propanel_db_v2 (both on 5433)
+  # Source DSN points to propanel_db; Target DSN points to propanel_db_v2 (both on port 5433)
   python backend/scripts/migrate_legacy_data.py \
       --source-dsn "postgres://propanel_user:${DB_PASS}@127.0.0.1:5433/propanel_db" \
       --target-dsn "postgres://propanel_user:${DB_PASS}@127.0.0.1:5433/propanel_db_v2" \
@@ -406,8 +422,8 @@
 
 ## Phase 6: Media Asset Inventory & Verification
 
-### Command 6.1: Capture Pre-Cutover Media Archive
-- **Purpose**: Create an immutable backup of existing media before any changes.
+### Command 6.1: Capture Pre-Cutover Media Archive & Check Existing Ownership
+- **Purpose**: Create an immutable backup of existing media and preserve existing filesystem ownership.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: None (Filesystem).
 - **Nature**: `Read-Only`.
@@ -415,8 +431,11 @@
   ```bash
   tar -czvf "/home/acw/backups/cutover_${CUTOVER_TIME}/media_pre_cutover_${CUTOVER_TIME}.tar.gz" -C /home/acw/pro-panel/backend media/
   sha256sum "/home/acw/backups/cutover_${CUTOVER_TIME}/media_pre_cutover_${CUTOVER_TIME}.tar.gz" >> /home/acw/backups/cutover_${CUTOVER_TIME}/SHA256SUMS
+
+  MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
+  echo "Existing media directory ownership: ${MEDIA_OWNER}"
   ```
-- **Expected Output**: Archive created and checksum recorded.
+- **Expected Output**: Archive created, checksum recorded, ownership verified (e.g. `acw:acw`).
 - **Failure Handling**: If archive fails, verify disk space.
 
 ---
@@ -444,8 +463,8 @@
 
 ## Phase 7: Application Configuration Update & Service Cutover
 
-### Command 7.1: Update `/home/acw/pro-panel/backend/.env` to `propanel_db_v2`
-- **Purpose**: Point application database connection to `propanel_db_v2` on port 5433.
+### Command 7.1: Controlled Atomic Update of `/home/acw/pro-panel/backend/.env`
+- **Purpose**: Atomically update database connection to `propanel_db_v2` while preserving all other variables and masking credentials.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: Application runtime.
 - **Nature**: `State-Change`.
@@ -454,36 +473,75 @@
   cd /home/acw/pro-panel/backend
   cp .env .env.pre_cutover_${CUTOVER_TIME}
 
-  # Update database name from propanel_db to propanel_db_v2
-  sed -i 's/\/propanel_db$/\/propanel_db_v2/g' .env
-  sed -i 's/\/propanel_db"/ \/propanel_db_v2"/g' .env
-  sed -i "s/\/propanel_db'/ \/propanel_db_v2'/g" .env
-  sed -i 's/DB_NAME=propanel_db/DB_NAME=propanel_db_v2/g' .env
-  sed -i 's/POSTGRES_DB=propanel_db/POSTGRES_DB=propanel_db_v2/g' .env
+  # Controlled atomic update
+  /home/acw/pro-panel/backend/.venv/bin/python -c "
+  import re, tempfile, os
+  from pathlib import Path
 
-  # Verify .env changes
-  grep -E "DATABASE_URL|DB_NAME|POSTGRES_DB" .env
+  env_file = Path('/home/acw/pro-panel/backend/.env')
+  content = env_file.read_text()
+
+  # Replace database name in DATABASE_URL
+  new_content = re.sub(
+      r'(DATABASE_URL\s*=\s*[\"\']?[^\"\']*/)(propanel_db)([\?\"\'\s]|$)',
+      r'\g<1>propanel_db_v2\g<3>',
+      content
+  )
+  new_content = re.sub(
+      r'^(DB_NAME\s*=\s*[\"\']?)propanel_db([\"\']?)',
+      r'\g<1>propanel_db_v2\g<2>',
+      new_content,
+      flags=re.MULTILINE
+  )
+  new_content = re.sub(
+      r'^(POSTGRES_DB\s*=\s*[\"\']?)propanel_db([\"\']?)',
+      r'\g<1>propanel_db_v2\g<2>',
+      new_content,
+      flags=re.MULTILINE
+  )
+
+  with tempfile.NamedTemporaryFile('w', dir=env_file.parent, delete=False) as tf:
+      tf.write(new_content)
+      temp_path = tf.name
+
+  os.replace(temp_path, env_file)
+  os.chmod(env_file, 0o600)
+  print('SUCCESS: .env atomically updated to propanel_db_v2.')
+  "
+
+  # Verify connection targets WITHOUT exposing passwords
+  /home/acw/pro-panel/backend/.venv/bin/python -c "
+  import re
+  from urllib.parse import urlsplit
+
+  for line in open('/home/acw/pro-panel/backend/.env'):
+      if re.match(r'^\s*DATABASE_URL\s*=', line):
+          val = line.split('=', 1)[1].strip().strip('\"\'')
+          u = urlsplit(val)
+          masked_netloc = f'{u.username}:***@{u.hostname}:{u.port}' if u.username else u.netloc
+          print(f'Verified DATABASE_URL: {u.scheme}://{masked_netloc}{u.path}')
+      elif re.match(r'^\s*(?:DB_NAME|POSTGRES_DB)\s*=', line):
+          k, v = line.strip().split('=', 1)
+          print(f'Verified {k.strip()}: {v.strip()}')
+  "
   ```
-- **Expected Output**: Shows database name is `propanel_db_v2` and port remains `5433`.
+- **Expected Output**: Shows database name is `propanel_db_v2` and port remains `5433` with credentials safely masked.
 - **Failure Handling**: If `.env` is corrupted, restore from `.env.pre_cutover_${CUTOVER_TIME}`.
 
 ---
 
-### Command 7.2: Collect Static Files & Clear Redis Cache
-- **Purpose**: Ensure static assets are collected and cached database queries are purged.
+### Command 7.2: Collect Static Files
+- **Purpose**: Ensure static assets are collected. (Flushing Redis is strictly prohibited).
 - **Machine**: Production VPS as user `acw`.
-- **Affected DB**: Redis cache / static files.
+- **Affected DB**: Static files.
 - **Nature**: `State-Change`.
 - **Command**:
   ```bash
   cd /home/acw/pro-panel/backend
-  source /home/acw/pro-panel/venv/bin/activate
+  source /home/acw/pro-panel/backend/.venv/bin/activate
   python manage.py collectstatic --noinput
-
-  # Clear redis cache safely
-  redis-cli FLUSHDB || true
   ```
-- **Expected Output**: Static files collected; Redis reports `OK`.
+- **Expected Output**: Static files collected; `0 static files copied...` or updated files copied.
 - **Failure Handling**: Inspect static permissions if failed.
 
 ---
@@ -501,10 +559,10 @@
       sudo systemctl restart propanel
       sudo systemctl status propanel --no-pager
   else
-      # Option B: Safe background launch with Gunicorn
+      # Option B: Safe background launch with Gunicorn in verified virtualenv
       cd /home/acw/pro-panel/backend
-      source /home/acw/pro-panel/venv/bin/activate
-      nohup gunicorn config.wsgi:application \
+      source /home/acw/pro-panel/backend/.venv/bin/activate
+      nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
           --bind 127.0.0.1:8000 \
           --workers 3 \
           --timeout 120 \
@@ -541,10 +599,12 @@
 - **Command**:
   ```bash
   curl -I http://127.0.0.1:8000/api/health/ || curl -I http://127.0.0.1:8000/
+  curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/admin/login/
   ```
 - **Expected Output**:
   ```
   HTTP/1.1 200 OK ...
+  200
   ```
 - **Failure Handling**: Check Gunicorn error log if 500 error returned.
 
@@ -557,14 +617,11 @@
 - **Nature**: `State-Change`.
 - **Command**:
   ```bash
-  sudo ln -sf /etc/nginx/sites-available/propanel_production.conf /etc/nginx/sites-enabled/propanel.conf || true
+  # Check syntax before reloading
   sudo nginx -t && sudo systemctl reload nginx
   ```
-- **Expected Output**:
-  ```
-  nginx: configuration file /etc/nginx/nginx.conf test is successful
-  ```
-- **Failure Handling**: If reload fails, revert to maintenance splash and investigate.
+- **Expected Output**: `nginx: configuration file /etc/nginx/nginx.conf test is successful`.
+- **Failure Handling**: If reload fails, investigate `/var/log/nginx/error.log`.
 
 ---
 
@@ -574,9 +631,9 @@
 
 ---
 
-## Command-by-Command Emergency Rollback Script
+## Phase 9: Command-by-Command Fast-Path Rollback Script
 
-If ANY checkpoint fails or an unrecoverable error occurs, execute this exact fast-path rollback to restore original `propanel_db`:
+If ANY checkpoint fails or an unrecoverable error occurs, execute this exact, non-destructive fast-path rollback:
 
 ### Rollback Command R.1: Stop Backend Process on Port 8000
 ```bash
@@ -587,35 +644,87 @@ PIDS=$(ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.
 [ -n "$PIDS" ] && kill -TERM $PIDS
 ```
 
-### Rollback Command R.2: Revert `.env` to Original `propanel_db` (Port 5433)
+### Rollback Command R.2: Revert Codebase to Pre-Cutover Baseline
 ```bash
-cd /home/acw/pro-panel/backend
-sed -i 's/\/propanel_db_v2$/\/propanel_db/g' .env
-sed -i 's/\/propanel_db_v2"/ \/propanel_db"/g' .env
-sed -i "s/\/propanel_db_v2'/ \/propanel_db'/g" .env
-sed -i 's/DB_NAME=propanel_db_v2/DB_NAME=propanel_db/g' .env
-sed -i 's/POSTGRES_DB=propanel_db_v2/POSTGRES_DB=propanel_db/g' .env
-grep -E "DATABASE_URL|DB_NAME" .env
+cd /home/acw/pro-panel
+if [ -f /home/acw/pro-panel/pre_cutover_commit.txt ]; then
+    PRE_CUTOVER_COMMIT=$(cat /home/acw/pro-panel/pre_cutover_commit.txt)
+else
+    PRE_CUTOVER_COMMIT="pre-cutover-baseline"
+fi
+git checkout "${PRE_CUTOVER_COMMIT}"
 ```
 
-### Rollback Command R.3: Restart Backend Process Pointing to `propanel_db`
+### Rollback Command R.3: Revert `.env` to Original `propanel_db` (Port 5433)
 ```bash
-redis-cli FLUSHDB || true
+cd /home/acw/pro-panel/backend
+/home/acw/pro-panel/backend/.venv/bin/python -c "
+import re, tempfile, os
+from pathlib import Path
+
+env_file = Path('/home/acw/pro-panel/backend/.env')
+content = env_file.read_text()
+
+new_content = re.sub(
+    r'(DATABASE_URL\s*=\s*[\"\']?[^\"\']*/)(propanel_db_v2)([\?\"\'\s]|$)',
+    r'\g<1>propanel_db\g<3>',
+    content
+)
+new_content = re.sub(
+    r'^(DB_NAME\s*=\s*[\"\']?)propanel_db_v2([\"\']?)',
+    r'\g<1>propanel_db\g<2>',
+    new_content,
+    flags=re.MULTILINE
+)
+new_content = re.sub(
+    r'^(POSTGRES_DB\s*=\s*[\"\']?)propanel_db_v2([\"\']?)',
+    r'\g<1>propanel_db\g<2>',
+    new_content,
+    flags=re.MULTILINE
+)
+
+with tempfile.NamedTemporaryFile('w', dir=env_file.parent, delete=False) as tf:
+    tf.write(new_content)
+    temp_path = tf.name
+
+os.replace(temp_path, env_file)
+os.chmod(env_file, 0o600)
+print('SUCCESS: .env atomically reverted to propanel_db.')
+"
+```
+
+### Rollback Command R.4: Verify Integrity of Untouched `propanel_db`
+```bash
+sudo -u postgres /usr/lib/postgresql/16/bin/psql -p 5433 -d propanel_db -c "
+SELECT count(*) AS public_tables FROM information_schema.tables WHERE table_schema = 'public';
+SELECT count(*) AS applied_migrations FROM django_migrations;
+"
+# Expected: 31 tables, 140 migrations
+```
+
+### Rollback Command R.5: Restart Backend Process Pointing to `propanel_db`
+```bash
+# Note: DO NOT run redis-cli FLUSHDB
+cd /home/acw/pro-panel/backend
+source /home/acw/pro-panel/backend/.venv/bin/activate
+python manage.py check
+
 if [ -f /etc/systemd/system/propanel.service ]; then
     sudo systemctl restart propanel
 else
-    cd /home/acw/pro-panel/backend
-    source /home/acw/pro-panel/venv/bin/activate
-    nohup gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 3 --timeout 120 --daemon
+    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+        --bind 127.0.0.1:8000 \
+        --workers 3 \
+        --timeout 120 \
+        --daemon
 fi
 sleep 2
 ss -tlpn | grep 8000
 ```
 
-### Rollback Command R.4: Restore Production Nginx Traffic
+### Rollback Command R.6: Restore Production Nginx Traffic
 ```bash
-sudo ln -sf /etc/nginx/sites-available/propanel_production.conf /etc/nginx/sites-enabled/propanel.conf || true
-sudo nginx -s reload
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-**Total Rollback Duration**: $< 2\text{ minutes}$. Source database `propanel_db` on port 5433 is completely untouched.
+**Estimated Rollback Duration**: ~3–5 minutes. Source database `propanel_db` on port 5433 is completely untouched.

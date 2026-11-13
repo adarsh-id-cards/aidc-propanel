@@ -109,13 +109,15 @@ sha256sum --check backend/media_manifest.sha256
 
 Every line must output `OK`. If any file fails checksum verification, the cutover is paused and the asset is restored from backup before proceeding.
 
-### Step 3: Filesystem Permissions Hardening
+### Step 3: Filesystem Permissions & Ownership Preservation
 
-Set restrictive, secure ownership and permissions on the media directory:
+Preserve verified filesystem ownership (typically `acw:acw`) and enforce secure permissions on the media directory:
 
 ```bash
-# Set ownership to web server / application user
-sudo chown -R www-data:www-data /home/acw/pro-panel/backend/media
+# Detect and preserve verified existing ownership
+MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
+echo "Preserving verified media directory ownership: ${MEDIA_OWNER}"
+sudo chown -R "${MEDIA_OWNER}" /home/acw/pro-panel/backend/media
 
 # Directories: 755 (read/write/execute for owner, read/execute for others)
 sudo find /home/acw/pro-panel/backend/media -type d -exec chmod 755 {} +

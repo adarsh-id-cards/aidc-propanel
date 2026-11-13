@@ -15,11 +15,12 @@ The production environment configuration has been verified from the live VPS (`1
 | **SSH User** | `acw` | Standard non-root deployer account |
 | **Project Root** | `/home/acw/pro-panel` | Application base directory |
 | **Backend Directory** | `/home/acw/pro-panel/backend` | Django project root (`manage.py`, `config/`) |
+| **Backend Virtualenv** | `/home/acw/pro-panel/backend/.venv` | Verified Python virtual environment |
 | **Backend Config** | `/home/acw/pro-panel/backend/.env` | Application runtime environment variables (`DATABASE_URL`, etc.) |
 | **Frontend Build** | `/home/acw/pro-panel/frontend/dist` | Compiled Vite/React static assets |
 | **Nginx Config** | `/etc/nginx` | Routes `propanel.adarshbhopal.in` (frontend) and `api.propanel.adarshbhopal.in` |
 | **Nginx Upstream** | `http://127.0.0.1:8000` | Reverse proxy target for all API requests |
-| **Backend Process** | Bound to `127.0.0.1:8000` | Currently managed via process supervisor / manual Gunicorn (no systemd service installed) |
+| **Backend Process** | Bound to `127.0.0.1:8000` | Process managed via Gunicorn on port 8000 (systemd unit provided) |
 | **PostgreSQL 14** | `127.0.0.1:5432` | **Contains only default `postgres` DB**. Unassociated with Pro-Panel. |
 | **PostgreSQL 16** | `127.0.0.1:5433` | **Dedicated production cluster** (`/usr/lib/postgresql/16/bin/`) |
 | **Source DB (Blue)** | `propanel_db` (Port `5433`) | Existing production database (31 tables, 140 migration records) — **READ-ONLY** |
@@ -47,29 +48,38 @@ The pre-flight audit of earlier documentation identified critical discrepancies 
   - Created fresh in the PostgreSQL 16 cluster: `createdb -p 5433 -O propanel_user propanel_db_v2`.
   - All 31 clean initial Django migrations applied to `propanel_db_v2`.
   - Data streamed from `propanel_db` $\to$ `propanel_db_v2` via `migrate_legacy_data.py`.
-- **Switch Mechanism**: Updating `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` from `propanel_db` to `propanel_db_v2` and restarting the application process on port 8000.
+- **Switch Mechanism**: Controlled atomic update of `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` from `propanel_db` to `propanel_db_v2` and restarting the application process on port 8000.
 
-### 2.3 Strict Rollback Policy to Existing `propanel_db`
+### 2.3 Strict Fast-Path Rollback Policy & Code Coupling
 - Because `propanel_db` is never modified or renamed during the cutover:
-  1. Rollback requires only editing `DATABASE_URL` in `/home/acw/pro-panel/backend/.env` back to `.../propanel_db`.
-  2. Restarting the backend process on `127.0.0.1:8000`.
-  3. Total rollback duration is **under 2 minutes** with zero data restoration required.
-  4. `propanel_db` is retained indefinitely (minimum 14 days) alongside `propanel_db_v2`.
+  1. Reverting `.env` `DATABASE_URL` points back to `propanel_db` on port 5433.
+  2. **Application Code Recovery Step**: Because the new Django models in `04ed567`+ are incompatible with the legacy 31-table schema, rollback requires running `git checkout ${PRE_CUTOVER_COMMIT}` to restore matching application code.
+  3. Restarting the backend process on `127.0.0.1:8000` and executing health checks.
+  4. Non-destructive fast rollback estimated at ~3–5 minutes (no sub-two-minute claim is guaranteed until live rehearsal).
+  5. `propanel_db` is retained indefinitely (minimum 14 days) alongside `propanel_db_v2`.
 
-### 2.4 Removal of Hallucinated Systemd Services
+### 2.4 Removal of Hallucinated Services & Process Management
 - **Previous Assumption**: Assumed `propanel-web.service`, `propanel-worker.service`, and `propanel-beat.service` existed.
-- **Verified VPS Reality**: No such systemd unit files have been installed or configured. The backend is currently bound to `127.0.0.1:8000` via a background process.
+- **Verified VPS Reality**: No such systemd unit files were configured.
 - **Correction Applied**: The updated runbook provides commands to:
   1. Inspect the exact process bound to `127.0.0.1:8000` using `ss -tlpn` and `ps aux`.
   2. Gracefully stop that specific process.
-  3. Provide a validated, clean systemd unit template (`/etc/systemd/system/propanel.service`) or safe start command for managing Gunicorn.
+  3. Provide a validated systemd unit template (`/etc/systemd/system/propanel.service`) using `/home/acw/pro-panel/backend/.venv` or direct verified Gunicorn startup.
 
-### 2.5 Native PostgreSQL 16 Backup & Strict Error Handling
-- Because the backup on the VPS is captured directly from PostgreSQL 16 on port 5433 using `/usr/lib/postgresql/16/bin/pg_dump`, it will contain **zero PostgreSQL 17 GUC parameters** (no `transaction_timeout = 0;`).
+### 2.5 Prohibition of Redis Flushing & Media Ownership Preservation
+- **Redis Preservation**: `redis-cli FLUSHDB` is completely removed and strictly prohibited. Flushing Redis during cutover or rollback risks purging active sessions or Celery tasks.
+- **Media Permissions**: Blind `chown www-data:www-data` is removed. Runbooks inspect and preserve existing ownership (`stat -c '%U:%G'`), ensuring process user `acw` retains full access.
+
+### 2.6 Atomic `.env` Updates & Credential Masking
+- Broad, dangerous `sed -i` commands are replaced with an atomic Python updater using `tempfile` and `os.replace`.
+- Database verification commands sanitize credentials, printing scheme, host, port, and database name while masking passwords.
+
+### 2.7 Native PostgreSQL 16 Backup & Strict Error Handling
+- Because the backup on the VPS is captured directly from PostgreSQL 16 on port 5433 using `/usr/lib/postgresql/16/bin/pg_dump`, it contains **zero PostgreSQL 17 GUC parameters**.
 - All restore and verification commands execute with strict error detection enabled:
   - `psql -v ON_ERROR_STOP=1 ...`
   - `pg_restore --exit-on-error ...`
-- Omitting error detection or suppressing warnings is strictly forbidden.
+- Destructive operations (`dropdb`, `createdb`) are strictly isolated to emergency disaster recovery requiring explicit operator approval.
 
 ---
 
@@ -117,14 +127,14 @@ The pre-flight audit of earlier documentation identified critical discrepancies 
 - Audit script `backend/scripts/audit_media_storage.py` verified:
   - 308 files (.png), 22,626 bytes (~22.1 KB) in `/home/acw/pro-panel/backend/media`.
   - Checksums recorded in `backend/media_manifest.sha256`.
-  - All 308 files verified with `sha256sum --check`.
+  - All 308 files verified with `sha256sum --check`. Existing filesystem ownership preserved.
 
 ### Point 10: Migration Utility Source Immutability
 - `backend/scripts/migrate_legacy_data.py` enforces `conn_src.set_session(readonly=True)`.
 - Physical engine-level write blocking guarantees zero modification to `propanel_db`.
 
 ### Point 11: Rollback Procedure Verification
-- Reverting `.env` `DATABASE_URL` from `propanel_db_v2` to `propanel_db` and restarting the port 8000 backend process restores the exact prior state in under 2 minutes.
+- Reverting `.env` `DATABASE_URL` from `propanel_db_v2` to `propanel_db`, checking out `${PRE_CUTOVER_COMMIT}`, and restarting the port 8000 backend process restores the exact prior state.
 - `propanel_db` is retained indefinitely.
 
 ---
