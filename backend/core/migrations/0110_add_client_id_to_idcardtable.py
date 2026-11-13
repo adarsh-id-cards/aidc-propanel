@@ -11,13 +11,11 @@ def add_client_id_column(apps, schema_editor):
     """Add client_id and organisation_id to core_idcardtable if not present."""
     connection = schema_editor.connection
     with connection.cursor() as cursor:
-        cols = set()
-        if connection.vendor == 'sqlite':
-            cursor.execute("PRAGMA table_info(core_idcardtable)")
-            cols = {row[1].lower() for row in cursor.fetchall()}
-        else:
-            description = connection.introspection.get_table_description(cursor, 'core_idcardtable')
-            cols = {col.name.lower() for col in description}
+        tables = {t.lower() for t in connection.introspection.table_names(cursor)}
+        if 'core_idcardtable' not in tables:
+            return
+        description = connection.introspection.get_table_description(cursor, 'core_idcardtable')
+        cols = {col.name.lower() for col in description}
 
         if 'client_id' not in cols:
             cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")

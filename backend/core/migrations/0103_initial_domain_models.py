@@ -9,49 +9,45 @@ from django.db import migrations, models
 def sync_core_client_columns(apps, schema_editor):
     connection = schema_editor.connection
     with connection.cursor() as cursor:
-        existing = {col.name for col in connection.introspection.get_table_description(cursor, 'core_client')}
+        existing = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_client')}
         
         column_defs = {
             'user_id': "ALTER TABLE core_client ADD COLUMN user_id integer NULL REFERENCES core_user(id)",
             'client_type': "ALTER TABLE core_client ADD COLUMN client_type varchar(50) DEFAULT 'school'",
-            'org_role': "ALTER TABLE core_client ADD COLUMN org_role varchar(50) DEFAULT 'organisation'",
-            'is_guest': "ALTER TABLE core_client ADD COLUMN is_guest bool DEFAULT 0",
-            'is_default': "ALTER TABLE core_client ADD COLUMN is_default bool DEFAULT 0",
+            'is_guest': "ALTER TABLE core_client ADD COLUMN is_guest bool DEFAULT FALSE",
+            'is_default': "ALTER TABLE core_client ADD COLUMN is_default bool DEFAULT FALSE",
             'icon': "ALTER TABLE core_client ADD COLUMN icon varchar(100) DEFAULT 'fa-solid fa-building'",
-            'perm_organisation_list': "ALTER TABLE core_client ADD COLUMN perm_organisation_list bool DEFAULT 0",
-            'perm_idcard_client_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_client_list bool DEFAULT 0",
-            'perm_idcard_setting_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_list bool DEFAULT 0",
-            'perm_idcard_setting_add': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_add bool DEFAULT 0",
-            'perm_idcard_setting_edit': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_edit bool DEFAULT 0",
-            'perm_idcard_setting_delete': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_delete bool DEFAULT 0",
-            'perm_idcard_setting_status': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_status bool DEFAULT 0",
-            'perm_idcard_pending_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_pending_list bool DEFAULT 0",
-            'perm_idcard_verified_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_verified_list bool DEFAULT 0",
-            'perm_idcard_pool_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_pool_list bool DEFAULT 0",
-            'perm_idcard_approved_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_approved_list bool DEFAULT 0",
-            'perm_idcard_download_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_download_list bool DEFAULT 0",
-            'perm_idcard_reprint_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_reprint_list bool DEFAULT 0",
-            'perm_reprint_request_list': "ALTER TABLE core_client ADD COLUMN perm_reprint_request_list bool DEFAULT 0",
-            'perm_confirmed_list': "ALTER TABLE core_client ADD COLUMN perm_confirmed_list bool DEFAULT 0",
-            'perm_idcard_add': "ALTER TABLE core_client ADD COLUMN perm_idcard_add bool DEFAULT 0",
-            'perm_idcard_edit': "ALTER TABLE core_client ADD COLUMN perm_idcard_edit bool DEFAULT 0",
-            'perm_idcard_delete': "ALTER TABLE core_client ADD COLUMN perm_idcard_delete bool DEFAULT 0",
-            'perm_idcard_info': "ALTER TABLE core_client ADD COLUMN perm_idcard_info bool DEFAULT 0",
-            'perm_idcard_approve': "ALTER TABLE core_client ADD COLUMN perm_idcard_approve bool DEFAULT 0",
-            'perm_idcard_verify': "ALTER TABLE core_client ADD COLUMN perm_idcard_verify bool DEFAULT 0",
-            'perm_idcard_updated_at': "ALTER TABLE core_client ADD COLUMN perm_idcard_updated_at bool DEFAULT 0",
-            'perm_idcard_delete_from_pool': "ALTER TABLE core_client ADD COLUMN perm_idcard_delete_from_pool bool DEFAULT 0",
-            'perm_reupload_idcard_image': "ALTER TABLE core_client ADD COLUMN perm_reupload_idcard_image bool DEFAULT 0",
+            'perm_organisation_list': "ALTER TABLE core_client ADD COLUMN perm_organisation_list bool DEFAULT FALSE",
+            'perm_idcard_client_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_client_list bool DEFAULT FALSE",
+            'perm_idcard_setting_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_list bool DEFAULT FALSE",
+            'perm_idcard_setting_add': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_add bool DEFAULT FALSE",
+            'perm_idcard_setting_edit': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_edit bool DEFAULT FALSE",
+            'perm_idcard_setting_delete': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_delete bool DEFAULT FALSE",
+            'perm_idcard_setting_status': "ALTER TABLE core_client ADD COLUMN perm_idcard_setting_status bool DEFAULT FALSE",
+            'perm_idcard_pending_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_pending_list bool DEFAULT FALSE",
+            'perm_idcard_verified_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_verified_list bool DEFAULT FALSE",
+            'perm_idcard_pool_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_pool_list bool DEFAULT FALSE",
+            'perm_idcard_approved_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_approved_list bool DEFAULT FALSE",
+            'perm_idcard_download_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_download_list bool DEFAULT FALSE",
+            'perm_idcard_reprint_list': "ALTER TABLE core_client ADD COLUMN perm_idcard_reprint_list bool DEFAULT FALSE",
+            'perm_reprint_request_list': "ALTER TABLE core_client ADD COLUMN perm_reprint_request_list bool DEFAULT FALSE",
+            'perm_confirmed_list': "ALTER TABLE core_client ADD COLUMN perm_confirmed_list bool DEFAULT FALSE",
+            'perm_idcard_add': "ALTER TABLE core_client ADD COLUMN perm_idcard_add bool DEFAULT FALSE",
+            'perm_idcard_edit': "ALTER TABLE core_client ADD COLUMN perm_idcard_edit bool DEFAULT FALSE",
+            'perm_idcard_delete': "ALTER TABLE core_client ADD COLUMN perm_idcard_delete bool DEFAULT FALSE",
+            'perm_idcard_info': "ALTER TABLE core_client ADD COLUMN perm_idcard_info bool DEFAULT FALSE",
+            'perm_idcard_approve': "ALTER TABLE core_client ADD COLUMN perm_idcard_approve bool DEFAULT FALSE",
+            'perm_idcard_verify': "ALTER TABLE core_client ADD COLUMN perm_idcard_verify bool DEFAULT FALSE",
+            'perm_idcard_updated_at': "ALTER TABLE core_client ADD COLUMN perm_idcard_updated_at bool DEFAULT FALSE",
+            'perm_idcard_delete_from_pool': "ALTER TABLE core_client ADD COLUMN perm_idcard_delete_from_pool bool DEFAULT FALSE",
+            'perm_reupload_idcard_image': "ALTER TABLE core_client ADD COLUMN perm_reupload_idcard_image bool DEFAULT FALSE",
         }
 
         for col_name, sql in column_defs.items():
-            if col_name not in existing:
-                try:
-                    cursor.execute(sql)
-                except Exception:
-                    pass
+            if col_name.lower() not in existing:
+                cursor.execute(sql)
 
-        tables = connection.introspection.table_names(cursor)
+        tables = {t.lower() for t in connection.introspection.table_names(cursor)}
         if 'core_idcardtable' in tables:
             tbl_cols = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')}
             if 'client_id' not in tbl_cols:

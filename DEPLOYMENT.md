@@ -514,3 +514,4 @@ python manage.py create_super_admin
 ### Q4: Real-time WebSockets fail to connect (`/ws/...`)
 - **Cause**: Nginx is not passing WebSocket upgrade headers, or Redis is not reachable.
 - **Fix**: Ensure Nginx includes `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";`. Test Redis connection with `redis-cli ping`.
+

@@ -7,35 +7,46 @@ from django.db import migrations, models
 def sync_tables_schema(apps, schema_editor):
     connection = schema_editor.connection
     with connection.cursor() as cursor:
-        tables = connection.introspection.table_names(cursor)
+        tables = {t.lower() for t in connection.introspection.table_names(cursor)}
         if 'core_idcardtable' not in tables:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS core_idcardtable (
-                    id integer NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    name varchar(255) NOT NULL,
-                    description text NULL,
-                    table_type varchar(20) NOT NULL,
-                    fields json NOT NULL,
-                    is_active bool NOT NULL,
-                    deleted_by_client bool NOT NULL DEFAULT 0,
-                    created_at datetime NOT NULL,
-                    updated_at datetime NOT NULL,
-                    organisation_id bigint NULL REFERENCES core_client(id),
-                    client_id bigint NULL REFERENCES core_client(id)
-                )
-            """)
+            if connection.vendor == 'postgresql':
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS core_idcardtable (
+                        id bigserial NOT NULL PRIMARY KEY,
+                        name varchar(255) NOT NULL,
+                        description text NULL,
+                        table_type varchar(20) NOT NULL,
+                        fields jsonb NOT NULL,
+                        is_active bool NOT NULL,
+                        deleted_by_client bool NOT NULL DEFAULT FALSE,
+                        created_at timestamp with time zone NOT NULL,
+                        updated_at timestamp with time zone NOT NULL,
+                        organisation_id bigint NULL REFERENCES core_client(id),
+                        client_id bigint NULL REFERENCES core_client(id)
+                    )
+                """)
+            else:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS core_idcardtable (
+                        id integer NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        name varchar(255) NOT NULL,
+                        description text NULL,
+                        table_type varchar(20) NOT NULL,
+                        fields json NOT NULL,
+                        is_active bool NOT NULL,
+                        deleted_by_client bool NOT NULL DEFAULT 0,
+                        created_at datetime NOT NULL,
+                        updated_at datetime NOT NULL,
+                        organisation_id bigint NULL REFERENCES core_client(id),
+                        client_id bigint NULL REFERENCES core_client(id)
+                    )
+                """)
         else:
-            columns = [col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')]
+            columns = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')}
             if 'client_id' not in columns:
-                try:
-                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")
-                except Exception:
-                    pass
+                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")
             if 'organisation_id' not in columns:
-                try:
-                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN organisation_id integer NULL")
-                except Exception:
-                    pass
+                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN organisation_id integer NULL")
 
 
 class Migration(migrations.Migration):
