@@ -12,7 +12,7 @@ def sync_core_client_columns(apps, schema_editor):
         existing = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_client')}
         
         column_defs = {
-            'user_id': "ALTER TABLE core_client ADD COLUMN user_id integer NULL REFERENCES core_user(id)",
+            'user_id': "ALTER TABLE core_client ADD COLUMN user_id bigint NULL REFERENCES core_user(id)",
             'client_type': "ALTER TABLE core_client ADD COLUMN client_type varchar(50) DEFAULT 'school'",
             'is_guest': "ALTER TABLE core_client ADD COLUMN is_guest bool DEFAULT FALSE",
             'is_default': "ALTER TABLE core_client ADD COLUMN is_default bool DEFAULT FALSE",
@@ -51,9 +51,7 @@ def sync_core_client_columns(apps, schema_editor):
         if 'core_idcardtable' in tables:
             tbl_cols = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')}
             if 'client_id' not in tbl_cols:
-                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")
-            if 'organisation_id' not in tbl_cols:
-                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN organisation_id integer NULL")
+                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
 
 
 class Migration(migrations.Migration):

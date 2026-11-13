@@ -169,4 +169,36 @@ This document provides a comprehensive, file-by-file record of every cleanup, de
 ### `frontend/.env.example`
 - **Action**: Added documentation for `VITE_TENANT_BASE_DOMAIN` and updated the production API endpoint example.
 
+---
+
+## 6. PostgreSQL Migration Harmonization & VPS Schema Alignment
+
+### `backend/core/migrations/0103_initial_domain_models.py`
+- **Location**: Line 15 and lines 50–57
+- **Change**:
+  - Changed `user_id integer` to `user_id bigint NULL REFERENCES core_user(id)` to match the `bigint` type of `core_user.id`.
+  - Changed `client_id integer` to `client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE`.
+  - Removed redundant attempt to add unused `organisation_id` column.
+- **Why Safe**: Eliminates PostgreSQL type mismatch errors between `core_client.user_id` and `core_user.id`.
+
+### `backend/tables/migrations/0001_initial_domain_models.py`
+- **Location**: Lines 7–85
+- **Change**:
+  - Raw DDL for `core_idcardtable` now creates `client_id bigint NOT NULL REFERENCES core_client(id) ON DELETE CASCADE` without introducing an unused `organisation_id` relationship column.
+  - Aligned model state definition for `deleted_by_manager` by adding `db_column='deleted_by_client'`, harmonizing Django state with the physical database column.
+  - For existing databases, added idempotent type widening (`ALTER COLUMN client_id TYPE bigint`) and foreign key constraint creation (`core_idcardtable_client_id_fk_core_client_id`) on PostgreSQL.
+- **Why Safe**: Matches Django model relationships exactly while providing safe forward migration on existing databases without dropping tables or columns.
+
+### `backend/core/migrations/0110_add_client_id_to_idcardtable.py`
+- **Location**: Lines 10–55
+- **Change**:
+  - Corrected integer/bigint mismatch by altering `client_id` to `bigint` on PostgreSQL if it was integer.
+  - Ensured idempotent foreign key constraint creation to `core_client(id) ON DELETE CASCADE`.
+  - Removed addition of unused `organisation_id` column.
+- **Why Safe**: Fully eliminates conflicts with `tables.0001` and guarantees final DB schema and Django migration state agreement.
+
+### `backend/core/migrations/0108_add_org_role_to_organisation.py`
+- **Status**: Retained idempotent column existence check (`if 'org_role' not in cols:`) using `SeparateDatabaseAndState` with `atomic=False`.
+
+
 

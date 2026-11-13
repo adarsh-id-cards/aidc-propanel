@@ -17,12 +17,11 @@ def sync_tables_schema(apps, schema_editor):
                         description text NULL,
                         table_type varchar(20) NOT NULL,
                         fields jsonb NOT NULL,
-                        is_active bool NOT NULL,
+                        is_active bool NOT NULL DEFAULT TRUE,
                         deleted_by_client bool NOT NULL DEFAULT FALSE,
                         created_at timestamp with time zone NOT NULL,
                         updated_at timestamp with time zone NOT NULL,
-                        organisation_id bigint NULL REFERENCES core_client(id),
-                        client_id bigint NULL REFERENCES core_client(id)
+                        client_id bigint NOT NULL REFERENCES core_client(id) ON DELETE CASCADE
                     )
                 """)
             else:
@@ -33,20 +32,55 @@ def sync_tables_schema(apps, schema_editor):
                         description text NULL,
                         table_type varchar(20) NOT NULL,
                         fields json NOT NULL,
-                        is_active bool NOT NULL,
+                        is_active bool NOT NULL DEFAULT 1,
                         deleted_by_client bool NOT NULL DEFAULT 0,
                         created_at datetime NOT NULL,
                         updated_at datetime NOT NULL,
-                        organisation_id bigint NULL REFERENCES core_client(id),
-                        client_id bigint NULL REFERENCES core_client(id)
+                        client_id bigint NOT NULL REFERENCES core_client(id) ON DELETE CASCADE
                     )
                 """)
         else:
             columns = {col.name.lower() for col in connection.introspection.get_table_description(cursor, 'core_idcardtable')}
             if 'client_id' not in columns:
-                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")
-            if 'organisation_id' not in columns:
-                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN organisation_id integer NULL")
+                if connection.vendor == 'postgresql':
+                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
+                else:
+                    cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
+            elif connection.vendor == 'postgresql':
+                cursor.execute("""
+                    SELECT data_type FROM information_schema.columns
+                    WHERE table_name = 'core_idcardtable' AND column_name = 'client_id'
+                """)
+                row = cursor.fetchone()
+                if row and row[0].lower() in ('integer', 'int4'):
+                    cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id TYPE bigint")
+                constraints = connection.introspection.get_constraints(cursor, 'core_idcardtable')
+                has_fk = any(
+                    c.get('foreign_key') == ('core_client', 'id') and 'client_id' in c.get('columns', [])
+                    for c in constraints.values()
+                )
+                if not has_fk:
+                    cursor.execute("""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint WHERE conname = 'core_idcardtable_client_id_fk_core_client_id'
+                            ) THEN
+                                ALTER TABLE core_idcardtable
+                                    ADD CONSTRAINT core_idcardtable_client_id_fk_core_client_id
+                                    FOREIGN KEY (client_id) REFERENCES core_client(id) ON DELETE CASCADE;
+                            END IF;
+                        END $$;
+                    """)
+
+            if 'deleted_by_client' not in columns:
+                if 'deleted_by_manager' in columns:
+                    cursor.execute("ALTER TABLE core_idcardtable RENAME COLUMN deleted_by_manager TO deleted_by_client")
+                else:
+                    if connection.vendor == 'postgresql':
+                        cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN deleted_by_client bool NOT NULL DEFAULT FALSE")
+                    else:
+                        cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN deleted_by_client bool NOT NULL DEFAULT 0")
 
 
 class Migration(migrations.Migration):
@@ -72,7 +106,7 @@ class Migration(migrations.Migration):
                         ('table_type', models.CharField(choices=[('school_student', 'School Student'), ('college_student', 'College Student'), ('staff', 'Staff / Employee'), ('custom', 'Custom')], default='custom', help_text='Auto-detected from table name and organisation type.', max_length=20)),
                         ('fields', models.JSONField(default=list, help_text='List of field configurations: [{name, type, order}]. Max 20 fields.')),
                         ('is_active', models.BooleanField(default=True)),
-                        ('deleted_by_manager', models.BooleanField(default=False, help_text='True when the prime manager soft-deletes this table.')),
+                        ('deleted_by_manager', models.BooleanField(db_column='deleted_by_client', default=False, help_text='True when the prime manager soft-deletes this table.')),
                         ('created_at', models.DateTimeField(auto_now_add=True)),
                         ('updated_at', models.DateTimeField(auto_now=True)),
                         ('organisation', models.ForeignKey(db_column='client_id', on_delete=django.db.models.deletion.CASCADE, related_name='tables', to='core.organisation')),

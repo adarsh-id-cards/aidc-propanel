@@ -8,7 +8,7 @@ from django.db import migrations, models
 
 
 def add_client_id_column(apps, schema_editor):
-    """Add client_id and organisation_id to core_idcardtable if not present."""
+    """Ensure core_idcardtable has client_id as bigint with foreign key to core_client."""
     connection = schema_editor.connection
     with connection.cursor() as cursor:
         tables = {t.lower() for t in connection.introspection.table_names(cursor)}
@@ -18,10 +18,37 @@ def add_client_id_column(apps, schema_editor):
         cols = {col.name.lower() for col in description}
 
         if 'client_id' not in cols:
-            cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id integer NULL")
+            if connection.vendor == 'postgresql':
+                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
+            else:
+                cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN client_id bigint NULL REFERENCES core_client(id) ON DELETE CASCADE")
+        elif connection.vendor == 'postgresql':
+            cursor.execute("""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_name = 'core_idcardtable' AND column_name = 'client_id'
+            """)
+            row = cursor.fetchone()
+            if row and row[0].lower() in ('integer', 'int4'):
+                cursor.execute("ALTER TABLE core_idcardtable ALTER COLUMN client_id TYPE bigint")
 
-        if 'organisation_id' not in cols:
-            cursor.execute("ALTER TABLE core_idcardtable ADD COLUMN organisation_id integer NULL")
+            constraints = connection.introspection.get_constraints(cursor, 'core_idcardtable')
+            has_fk = any(
+                c.get('foreign_key') == ('core_client', 'id') and 'client_id' in c.get('columns', [])
+                for c in constraints.values()
+            )
+            if not has_fk:
+                cursor.execute("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint WHERE conname = 'core_idcardtable_client_id_fk_core_client_id'
+                        ) THEN
+                            ALTER TABLE core_idcardtable
+                                ADD CONSTRAINT core_idcardtable_client_id_fk_core_client_id
+                                FOREIGN KEY (client_id) REFERENCES core_client(id) ON DELETE CASCADE;
+                        END IF;
+                    END $$;
+                """)
 
 
 class Migration(migrations.Migration):
