@@ -32,7 +32,7 @@ def _env_int(name: str, default: int, *, minimum: int | None = None, maximum: in
 _cpu_count = max(multiprocessing.cpu_count(), 1)
 _default_workers = 2 if _cpu_count <= 2 else min(4, _cpu_count + 1)
 
-bind = os.getenv("GUNICORN_BIND", "unix:/run/gunicorn.sock")
+bind = os.getenv("GUNICORN_BIND", "127.0.0.1:8000")
 backlog = _env_int("GUNICORN_BACKLOG", 2048, minimum=128, maximum=8192)
 
 # Default to ASGI worker so Django Channels/websockets work out of the box.

@@ -17,10 +17,12 @@ The production environment configuration has been verified from the live VPS (`1
 | **Backend Directory** | `/home/acw/pro-panel/backend` | Django project root (`manage.py`, `config/`) |
 | **Backend Virtualenv** | `/home/acw/pro-panel/backend/.venv` | Verified Python virtual environment |
 | **Backend Config** | `/home/acw/pro-panel/backend/.env` | Application runtime environment variables (`DATABASE_URL`, etc.) |
+| **Application Runtime**| **Django ASGI (`config.asgi:application`) + UvicornWorker** | Reconciled for WebSockets & Django Channels 4.x |
+| **Application Bind** | `127.0.0.1:8000` | Reconciled with Nginx upstream `django_backend` |
 | **Frontend Build** | `/home/acw/pro-panel/frontend/dist` | Compiled Vite/React static assets |
 | **Nginx Config** | `/etc/nginx` | Routes `propanel.adarshbhopal.in` (frontend) and `api.propanel.adarshbhopal.in` |
-| **Nginx Upstream** | `http://127.0.0.1:8000` | Reverse proxy target for all API requests |
-| **Backend Process** | Bound to `127.0.0.1:8000` | Process managed via Gunicorn on port 8000 (systemd unit provided) |
+| **Nginx Upstream** | `http://127.0.0.1:8000` | Reverse proxy target for all HTTP & WebSocket traffic |
+| **Backend Process** | Bound to `127.0.0.1:8000` | Managed via Gunicorn ASGI on port 8000 (systemd unit provided) |
 | **PostgreSQL 14** | `127.0.0.1:5432` | **Contains only default `postgres` DB**. Unassociated with Pro-Panel. |
 | **PostgreSQL 16** | `127.0.0.1:5433` | **Dedicated production cluster** (`/usr/lib/postgresql/16/bin/`) |
 | **Source DB (Blue)** | `propanel_db` (Port `5433`) | Existing production database (31 tables, 140 migration records) — **READ-ONLY** |
@@ -54,21 +56,22 @@ The pre-flight audit of earlier documentation identified critical discrepancies 
 - Because `propanel_db` is never modified or renamed during the cutover:
   1. Reverting `.env` `DATABASE_URL` points back to `propanel_db` on port 5433.
   2. **Application Code Recovery Step**: Because the new Django models in `04ed567`+ are incompatible with the legacy 31-table schema, rollback requires running `git checkout ${PRE_CUTOVER_COMMIT}` to restore matching application code.
-  3. Restarting the backend process on `127.0.0.1:8000` and executing health checks.
-  4. Non-destructive fast rollback estimated at ~3–5 minutes (no sub-two-minute claim is guaranteed until live rehearsal).
-  5. `propanel_db` is retained indefinitely (minimum 14 days) alongside `propanel_db_v2`.
+  3. Pre-cutover virtualenv snapshot (`/home/acw/pro-panel/backend/.venv_pre_cutover`) guarantees instant offline dependency restoration.
+  4. Restarting the ASGI backend process on `127.0.0.1:8000` and executing health checks.
+  5. Non-destructive fast rollback estimated at ~3–5 minutes (no sub-two-minute claim is guaranteed until live rehearsal).
+  6. `propanel_db` is retained indefinitely (minimum 14 days) alongside `propanel_db_v2`.
 
 ### 2.4 Removal of Hallucinated Services & Process Management
 - **Previous Assumption**: Assumed `propanel-web.service`, `propanel-worker.service`, and `propanel-beat.service` existed.
 - **Verified VPS Reality**: No such systemd unit files were configured.
 - **Correction Applied**: The updated runbook provides commands to:
-  1. Inspect the exact process bound to `127.0.0.1:8000` using `ss -tlpn` and `ps aux`.
-  2. Gracefully stop that specific process.
-  3. Provide a validated systemd unit template (`/etc/systemd/system/propanel.service`) using `/home/acw/pro-panel/backend/.venv` or direct verified Gunicorn startup.
+  1. Inspect the exact process bound to `127.0.0.1:8000` using `sudo ss -tlpn 'sport = :8000'`.
+  2. Gracefully stop that specific process and strictly verify port 8000 is free before continuing.
+  3. Provide a validated systemd unit template (`/etc/systemd/system/propanel.service`) using `/home/acw/pro-panel/backend/.venv` and `config.asgi:application`.
 
 ### 2.5 Prohibition of Redis Flushing & Media Ownership Preservation
 - **Redis Preservation**: `redis-cli FLUSHDB` is completely removed and strictly prohibited. Flushing Redis during cutover or rollback risks purging active sessions or Celery tasks.
-- **Media Permissions**: Blind `chown www-data:www-data` is removed. Runbooks inspect and preserve existing ownership (`stat -c '%U:%G'`), ensuring process user `acw` retains full access.
+- **Media Permissions**: Blind `chown www-data:www-data` and recursive `chmod` have been removed from normal rollback. Runbooks perform non-destructive inspection only.
 
 ### 2.6 Atomic `.env` Updates & Credential Masking
 - Broad, dangerous `sed -i` commands are replaced with an atomic Python updater using `tempfile` and `os.replace`.
@@ -80,6 +83,10 @@ The pre-flight audit of earlier documentation identified critical discrepancies 
   - `psql -v ON_ERROR_STOP=1 ...`
   - `pg_restore --exit-on-error ...`
 - Destructive operations (`dropdb`, `createdb`) are strictly isolated to emergency disaster recovery requiring explicit operator approval.
+
+### 2.8 ASGI Architecture & Gunicorn Bind Reconciliation
+- **ASGI & WebSockets**: The project uses Django Channels 4.x and ASGI (`config.asgi:application`). The synchronous WSGI callable (`config.wsgi:application`) is not used. Gunicorn is configured with `worker_class = uvicorn.workers.UvicornWorker` (`-k uvicorn.workers.UvicornWorker`).
+- **Gunicorn Bind Default**: `backend/config/gunicorn.conf.py` default has been reconciled to `127.0.0.1:8000`, matching Nginx upstream `django_backend` (`server 127.0.0.1:8000`).
 
 ---
 
@@ -127,14 +134,14 @@ The pre-flight audit of earlier documentation identified critical discrepancies 
 - Audit script `backend/scripts/audit_media_storage.py` verified:
   - 308 files (.png), 22,626 bytes (~22.1 KB) in `/home/acw/pro-panel/backend/media`.
   - Checksums recorded in `backend/media_manifest.sha256`.
-  - All 308 files verified with `sha256sum --check`. Existing filesystem ownership preserved.
+  - All 308 files verified with `sha256sum --check`. Existing filesystem ownership preserved with read-only inspection.
 
 ### Point 10: Migration Utility Source Immutability
 - `backend/scripts/migrate_legacy_data.py` enforces `conn_src.set_session(readonly=True)`.
 - Physical engine-level write blocking guarantees zero modification to `propanel_db`.
 
 ### Point 11: Rollback Procedure Verification
-- Reverting `.env` `DATABASE_URL` from `propanel_db_v2` to `propanel_db`, checking out `${PRE_CUTOVER_COMMIT}`, and restarting the port 8000 backend process restores the exact prior state.
+- Reverting `.env` `DATABASE_URL` from `propanel_db_v2` to `propanel_db`, checking out `${PRE_CUTOVER_COMMIT}`, and restarting the ASGI backend process on `127.0.0.1:8000` restores the exact prior state.
 - `propanel_db` is retained indefinitely.
 
 ---

@@ -20,6 +20,9 @@ This runbook specifies the precise sequence of operations required to migrate **
 | **Backend Directory** | `/home/acw/pro-panel/backend` |
 | **Backend Virtualenv** | `/home/acw/pro-panel/backend/.venv` |
 | **Backend Environment**| `/home/acw/pro-panel/backend/.env` |
+| **Application Runtime**| **Django ASGI (`config.asgi:application`) + UvicornWorker** |
+| **Gunicorn Config** | `backend/config/gunicorn.conf.py` (`worker_class = uvicorn.workers.UvicornWorker`) |
+| **Application Bind** | `127.0.0.1:8000` (Reconciled with Nginx upstream `django_backend`) |
 | **Frontend Directory** | `/home/acw/pro-panel/frontend/dist` |
 | **Web Upstream** | `http://127.0.0.1:8000` (Reverse proxied by Nginx) |
 | **PostgreSQL 14** | Port 5432 (Contains only default `postgres` DB — unused) |
@@ -29,7 +32,7 @@ This runbook specifies the precise sequence of operations required to migrate **
 | **Scheduled Window** | Off-Peak Window (Estimated: 02:00 – 02:30 IST) |
 | **Estimated Downtime** | 15–20 minutes (Read/Write maintenance mode) |
 | **Hard Abort Cutoff** | 30 minutes from maintenance initiation |
-| **Git Baseline Commit** | Certified Clean Architecture Commit (`04ed567` or latest) |
+| **Git Baseline Commit** | Certified Clean Architecture Commit (`6ed4ef3` or latest) |
 
 ---
 
@@ -54,16 +57,24 @@ SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema
 "
 # Expected output: PostgreSQL 16.x ... table_count: 31
 
-# 4. Verify Python virtual environment and dependencies
+# 4. Verify Python virtual environment and ASGI dependencies
 cd /home/acw/pro-panel/backend
 source /home/acw/pro-panel/backend/.venv/bin/activate
-python -c "import django, psycopg; print('Django:', django.__version__, '| Psycopg:', psycopg.__version__)"
+python -c "import django, psycopg, channels, uvicorn; print('Django:', django.__version__, '| Channels:', channels.__version__, '| Uvicorn:', uvicorn.__version__)"
 
-# 5. Record pre-cutover Git commit for code rollback safety
+# 5. Ensure old baseline commit and dependencies remain available for offline rollback
 cd /home/acw/pro-panel
 PRE_CUTOVER_COMMIT=$(git rev-parse HEAD)
 echo "${PRE_CUTOVER_COMMIT}" > /home/acw/pro-panel/pre_cutover_commit.txt
-git tag -f pre-cutover-baseline
+git tag -f pre-cutover-baseline "${PRE_CUTOVER_COMMIT}"
+echo "Recorded baseline commit: ${PRE_CUTOVER_COMMIT}"
+
+/home/acw/pro-panel/backend/.venv/bin/pip freeze > /home/acw/pro-panel/backend/pre_cutover_requirements.txt
+
+if [ ! -d /home/acw/pro-panel/backend/.venv_pre_cutover ]; then
+    echo "Creating offline snapshot of .venv..."
+    cp -r /home/acw/pro-panel/backend/.venv /home/acw/pro-panel/backend/.venv_pre_cutover
+fi
 ```
 
 ### 2.2 Provision Target Database `propanel_db_v2` on PostgreSQL 16
@@ -111,12 +122,12 @@ EOF
                                       │
                                       ▼
 +---------------------------------------------------------------------------------+
-| T+00:18  [Phase 6] Verify Media Assets (SHA-256 Checksum Manifest)              |
+| T+00:18  [Phase 6] Verify Media Assets (Non-Destructive Inspection)             |
 +---------------------------------------------------------------------------------+
                                       │
                                       ▼
 +---------------------------------------------------------------------------------+
-| T+00:20  [Phase 7] Update .env to propanel_db_v2, Restart Backend on Port 8000  |
+| T+00:20  [Phase 7] Update .env to propanel_db_v2, Restart ASGI Backend on 8000  |
 +---------------------------------------------------------------------------------+
                                       │
                                       ▼
@@ -143,14 +154,35 @@ sudo nginx -t && sudo systemctl reload nginx
 if systemctl is-active --quiet propanel 2>/dev/null; then
     sudo systemctl stop propanel
 fi
-PIDS=$(ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+
+# 3. Reliable PID discovery using sudo ss
+PIDS=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
 if [ -n "$PIDS" ]; then
-    kill -TERM $PIDS
-    sleep 2
+    echo "Stopping PID(s): $PIDS"
+    sudo kill -TERM $PIDS 2>/dev/null || true
+    
+    # Wait up to 10 seconds for graceful termination
+    for i in $(seq 1 10); do
+        if ! sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+            break
+        fi
+        sleep 1
+    done
+    
+    REMAINING=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+    if [ -n "$REMAINING" ]; then
+        sudo kill -9 $REMAINING 2>/dev/null || true
+        sleep 1
+    fi
 fi
 
-# 3. Verify port 8000 is free
-ss -tlpn | grep 8000 || echo "Port 8000 is stopped."
+# 4. Strictly verify port 8000 is free before continuing
+if sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+    echo "FATAL ERROR: Port 8000 is STILL bound! Aborting." >&2
+    exit 1
+else
+    echo "VERIFIED: Port 8000 is completely stopped."
+fi
 ```
 
 ---
@@ -251,11 +283,12 @@ cd /home/acw/pro-panel/backend
 # Validate all 308 media files against cryptographic SHA-256 manifest
 sha256sum --check backend/media_manifest.sha256
 
-# Preserve existing filesystem ownership (typically acw:acw)
+# Non-destructive inspection of media directory (no recursive mutation)
+echo "=== Media Directory Inspection ==="
+ls -ld /home/acw/pro-panel/backend/media
 MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
-sudo chown -R "${MEDIA_OWNER}" /home/acw/pro-panel/backend/media
-sudo find /home/acw/pro-panel/backend/media -type d -exec chmod 755 {} +
-sudo find /home/acw/pro-panel/backend/media -type f -exec chmod 644 {} +
+MEDIA_PERMS=$(stat -c '%a' /home/acw/pro-panel/backend/media)
+echo "Media ownership: ${MEDIA_OWNER} (Mode: ${MEDIA_PERMS})"
 ```
 
 ---
@@ -305,21 +338,21 @@ print('SUCCESS: .env atomically updated to propanel_db_v2.')
 # 3. Collect static files (DO NOT FLUSH REDIS)
 python manage.py collectstatic --noinput
 
-# 4. Start backend on port 8000
+# 4. Start ASGI backend on port 8000 using UvicornWorker
 if [ -f /etc/systemd/system/propanel.service ]; then
     sudo systemctl restart propanel
 else
     source /home/acw/pro-panel/backend/.venv/bin/activate
-    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn \
+        -c config/gunicorn.conf.py \
         --bind 127.0.0.1:8000 \
-        --workers 3 \
-        --timeout 120 \
+        config.asgi:application \
         --daemon
 fi
 
 # 5. Verify backend is active
 sleep 2
-ss -tlpn | grep 8000
+sudo ss -tlpn 'sport = :8000'
 ```
 
 ---

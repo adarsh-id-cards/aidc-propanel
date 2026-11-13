@@ -3,7 +3,7 @@
 > [!CAUTION]
 > This runbook is the definitive recovery protocol in the event of an aborted or failed production cutover. Following this protocol restores operational availability on the existing **`propanel_db` database on PostgreSQL 16 (port 5433)**.
 >
-> **Fast-path rollback is non-destructive**: because the existing `propanel_db` is accessed strictly in read-only mode during cutover, recovery involves switching application configuration back to `propanel_db`, checking out the pre-cutover code commit, and restarting the backend service. Estimated recovery time is approximately 3–5 minutes based on operational verification (no sub-two-minute SLA is claimed until rehearsed on the target environment).
+> **Fast-path rollback is non-destructive**: because the existing `propanel_db` is accessed strictly in read-only mode during cutover, recovery involves switching application configuration back to `propanel_db`, checking out the pre-cutover code commit, and restarting the ASGI backend service. Estimated recovery time is approximately 3–5 minutes based on operational verification (no sub-two-minute SLA is claimed until rehearsed on the target environment).
 
 ---
 
@@ -15,7 +15,7 @@ A rollback must be declared immediately by the Incident Commander or Database Ad
 2. **Data Reconciliation Discrepancy**: Record count or content comparison between `propanel_db` and `propanel_db_v2` reveals unexplained record loss or missing primary keys.
 3. **Health Check Failure**: `database_health_check.py` returns `Status: UNHEALTHY`, identifies orphaned foreign-key records, or un-synchronized sequences on `propanel_db_v2`.
 4. **Backend Startup Failure**: The application backend fails to start on port 8000 or crashes during startup.
-5. **Critical Application Error**: User authentication fails, critical API endpoints return HTTP 500, or data corruption is reported during post-cutover smoke tests.
+5. **Critical Application Error**: User authentication fails, WebSocket connections fail, critical API endpoints return HTTP 500, or data corruption is reported during post-cutover smoke tests.
 6. **Hard Cutoff Exceeded**: The maintenance window reaches **T+30 minutes** from initiation without achieving verified cutover.
 
 ---
@@ -38,10 +38,11 @@ Consequently, the fast-path rollback does NOT require slow or risky database dro
                   │  + Code Revert (git checkout baseline)         │  (Never drop immediately)
                   │                                                │
          +--------+------------------------------------------------+--------+
-         |               PRO-PANEL APPLICATION RUNTIME                      |
+         |               PRO-PANEL ASGI APPLICATION RUNTIME                 |
          |         /home/acw/pro-panel/backend/.env (Port 5433)             |
          |         Venv: /home/acw/pro-panel/backend/.venv                  |
-         |                     Upstream: 127.0.0.1:8000                     |
+         |         Callable: config.asgi:application (UvicornWorker)        |
+         |         Bind: 127.0.0.1:8000 (Consistent with Nginx Upstream)   |
          +------------------------------------------------------------------+
 ```
 
@@ -51,12 +52,15 @@ The new application codebase (from architectural rebuild commit `04ed567` onward
 Therefore, **fast-path rollback requires both**:
 1. Reverting application runtime configuration (`DATABASE_URL` in `.env` to `propanel_db`).
 2. Reverting application code to the recorded pre-cutover Git commit tag (`git checkout ${PRE_CUTOVER_COMMIT}`).
+3. Ensuring the pre-cutover dependencies remain cached and recoverable in `/home/acw/pro-panel/backend/.venv_pre_cutover`.
 
 ---
 
 ## 3. Fast-Path Rollback Execution Procedure (Non-Destructive)
 
-### Step 1: Halt Application Backend Process on Port 8000
+### Step 1: Halt Application Backend Process on Port 8000 & Verify Port is Free
+
+Use `sudo ss -tlpn 'sport = :8000'` for reliable process discovery and verify the port is free before continuing:
 
 ```bash
 # 1. Gracefully terminate backend process on port 8000
@@ -64,20 +68,43 @@ if systemctl is-active --quiet propanel 2>/dev/null; then
     sudo systemctl stop propanel
 fi
 
-PIDS=$(ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+# 2. Reliable PID discovery using sudo ss
+PIDS=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+
 if [ -n "$PIDS" ]; then
     echo "Stopping active process(es) on port 8000: $PIDS"
-    kill -TERM $PIDS
-    sleep 2
+    sudo kill -TERM $PIDS 2>/dev/null || true
+
+    # Wait up to 10 seconds for graceful termination
+    for i in $(seq 1 10); do
+        if ! sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+            break
+        fi
+        sleep 1
+    done
+
+    # Force kill if still bound
+    REMAINING=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+    if [ -n "$REMAINING" ]; then
+        echo "Process still bound; sending SIGKILL to PID(s): $REMAINING"
+        sudo kill -9 $REMAINING 2>/dev/null || true
+        sleep 1
+    fi
 fi
 
-# Verify port 8000 is free
-ss -tlpn | grep 8000 || echo "Port 8000 is confirmed free."
+# 3. VERIFY port 8000 is actually free before continuing
+if sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+    echo "FATAL ERROR: Port 8000 is STILL bound! Inspecting conflicting process:" >&2
+    sudo ss -tlpn 'sport = :8000' >&2
+    exit 1
+else
+    echo "VERIFIED: Port 8000 is confirmed completely free."
+fi
 ```
 
 ---
 
-### Step 2: Revert Application Codebase to Pre-Cutover Baseline
+### Step 2: Revert Application Codebase & Dependencies to Pre-Cutover Baseline
 
 Revert application code to the exact pre-cutover commit recorded before the maintenance window:
 
@@ -96,6 +123,12 @@ git checkout "${PRE_CUTOVER_COMMIT}"
 
 # Verify working tree status
 git status --porcelain
+
+# If dependency drift occurred during rehearsal, restore verified pre-cutover virtualenv snapshot:
+if [ -d /home/acw/pro-panel/backend/.venv_pre_cutover ]; then
+    echo "Restoring verified baseline dependencies from .venv_pre_cutover..."
+    rsync -a --delete /home/acw/pro-panel/backend/.venv_pre_cutover/ /home/acw/pro-panel/backend/.venv/
+fi
 ```
 
 ---
@@ -180,61 +213,75 @@ EOF
 
 ---
 
-### Step 5: Validate Media Directory & Preserve Existing Ownership
+### Step 5: Inspect and Report Media Ownership, File Counts & Permissions
 
-The media directory at `/home/acw/pro-panel/backend/media` is not modified during cutover. Confirm file counts and preserve existing file ownership:
+> [!NOTE]
+> **Zero Recursive Mutations**: In normal rollback, recursive `chown` and `chmod` operations are omitted. Only inspect and report media directory ownership, permissions, and file counts:
 
 ```bash
 cd /home/acw/pro-panel/backend
 
-# Detect and preserve current verified ownership (typically acw:acw)
-MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
-echo "Verified media directory ownership: ${MEDIA_OWNER}"
+echo "=== Media Directory Inspection ==="
+ls -ld media/
+MEDIA_OWNER=$(stat -c '%U:%G' media/)
+MEDIA_PERMS=$(stat -c '%a' media/)
+MEDIA_FILES=$(find media/ -type f | wc -l)
 
-# Verify file count (308 files)
-find media/ -type f | wc -l
+echo "Media directory ownership : ${MEDIA_OWNER}"
+echo "Media directory permission: ${MEDIA_PERMS}"
+echo "Total physical media files: ${MEDIA_FILES}"
 
-# Ensure directory and file permissions without blind chown to www-data
-sudo chown -R "${MEDIA_OWNER}" /home/acw/pro-panel/backend/media
-sudo find /home/acw/pro-panel/backend/media -type d -exec chmod 755 {} +
-sudo find /home/acw/pro-panel/backend/media -type f -exec chmod 644 {} +
+# Sample listing of media subdirectories
+ls -la media/ | head -n 10
 ```
+**Expected Output**: Directory owned by `acw:acw` (or verified app user), mode `755`, containing 308 files.
 
 ---
 
-### Step 6: Restart Backend Process Pointing to `propanel_db`
+### Step 6: Restart Backend ASGI Application Pointing to `propanel_db`
 
 > [!WARNING]
 > **DO NOT RUN `redis-cli FLUSHDB`**. 
 > Flushing Redis during rollback is strictly prohibited as it destroys user sessions, shared cache keys, and pending worker task queues.
 
+> [!IMPORTANT]
+> **ASGI / Channels Architecture Reconciliation**:
+> The application requires Django Channels and ASGI (`config.asgi:application`) running under `uvicorn.workers.UvicornWorker`.
+> Do **NOT** use `config.wsgi:application` with synchronous workers, which breaks WebSockets.
+>
+> **Verified Bind Configuration**:
+> Both Gunicorn and Nginx are reconciled to listen/proxy on `127.0.0.1:8000`.
+
 Restart backend process using verified virtual environment `/home/acw/pro-panel/backend/.venv`:
 
 ```bash
-# Check Django configuration health against reverted propanel_db
+# 1. Check Django configuration health against reverted propanel_db
 cd /home/acw/pro-panel/backend
 source /home/acw/pro-panel/backend/.venv/bin/activate
 python manage.py check
 
+# 2. Start Application:
 # Option A: If managed via systemd unit 'propanel'
 if [ -f /etc/systemd/system/propanel.service ]; then
     sudo systemctl daemon-reload
     sudo systemctl restart propanel
     sudo systemctl status propanel --no-pager
 else
-    # Option B: Direct verified Gunicorn startup
-    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+    # Option B: Direct verified Gunicorn ASGI startup
+    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn \
+        -c config/gunicorn.conf.py \
         --bind 127.0.0.1:8000 \
-        --workers 3 \
-        --timeout 120 \
-        --access-logfile /home/acw/pro-panel/backend/gunicorn_access.log \
-        --error-logfile /home/acw/pro-panel/backend/gunicorn_error.log \
+        config.asgi:application \
         --daemon
 fi
 
-# Verify process is listening on port 8000
+# 3. Verify process is active and bound to 127.0.0.1:8000
 sleep 2
-ss -tlpn | grep 8000
+sudo ss -tlpn 'sport = :8000'
+```
+**Expected Output**:
+```
+LISTEN ... 127.0.0.1:8000 ... users:(("gunicorn",pid=...,fd=...))
 ```
 
 ---
@@ -331,19 +378,22 @@ sudo -u postgres /usr/lib/postgresql/16/bin/pg_restore \
 tar -xzvf "${BACKUP_DIR}/media_pre_cutover_${TIMESTAMP}.tar.gz" -C /home/acw/pro-panel/backend/
 MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
 sudo chown -R "${MEDIA_OWNER}" /home/acw/pro-panel/backend/media
+sudo find /home/acw/pro-panel/backend/media -type d -exec chmod 755 {} +
+sudo find /home/acw/pro-panel/backend/media -type f -exec chmod 644 {} +
 ```
 
 ---
 
 ## 6. Process Management & Systemd Service Configuration
 
-If no systemd service is currently registered on the VPS, use this validated service unit template:
+If no systemd service is currently registered on the VPS, use this verified service unit template reconciling Django ASGI (`config.asgi:application`), UvicornWorker, and the `127.0.0.1:8000` Nginx bind:
 
 ### File: `/etc/systemd/system/propanel.service`
 ```ini
 [Unit]
-Description=Pro-Panel Django Gunicorn Application
-After=network.target postgresql.service
+Description=Pro-Panel Django ASGI Application (Uvicorn Worker)
+After=network.target postgresql.service redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=notify
@@ -351,13 +401,12 @@ User=acw
 Group=acw
 WorkingDirectory=/home/acw/pro-panel/backend
 Environment="PATH=/home/acw/pro-panel/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="GUNICORN_BIND=127.0.0.1:8000"
 EnvironmentFile=/home/acw/pro-panel/backend/.env
-ExecStart=/home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+ExecStart=/home/acw/pro-panel/backend/.venv/bin/gunicorn \
+    -c config/gunicorn.conf.py \
     --bind 127.0.0.1:8000 \
-    --workers 3 \
-    --timeout 120 \
-    --access-logfile /home/acw/pro-panel/backend/gunicorn_access.log \
-    --error-logfile /home/acw/pro-panel/backend/gunicorn_error.log
+    config.asgi:application
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=mixed
 TimeoutStopSec=30

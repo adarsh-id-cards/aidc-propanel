@@ -20,6 +20,9 @@
 | **Backend Directory** | `/home/acw/pro-panel/backend` |
 | **Backend Virtualenv** | `/home/acw/pro-panel/backend/.venv` |
 | **Backend Environment** | `/home/acw/pro-panel/backend/.env` |
+| **Application Runtime**| **Django ASGI (`config.asgi:application`) + UvicornWorker** |
+| **Gunicorn Config** | `backend/config/gunicorn.conf.py` (`worker_class = uvicorn.workers.UvicornWorker`) |
+| **Application Bind** | `127.0.0.1:8000` (Reconciled with Nginx upstream `django_backend`) |
 | **PostgreSQL 14** | Port 5432 (Contains only default `postgres` DB — UNUSED) |
 | **PostgreSQL 16** | Port 5433 (`/usr/lib/postgresql/16/bin/`) |
 | **Source DB (Blue)** | `propanel_db` (Port 5433, owner: `propanel_user`, 31 tables, 140 migrations) — **READ-ONLY** |
@@ -79,18 +82,18 @@
 
 ---
 
-### Command 0.3: Inspect Active Process Bound to Port 8000
-- **Purpose**: Identify the exact PID and process name currently serving the backend API on port 8000.
-- **Machine**: Production VPS as user `acw`.
+### Command 0.3: Inspect Active Process Bound to Port 8000 via `sudo ss`
+- **Purpose**: Reliably identify the exact PID and process name currently serving the backend API on port 8000.
+- **Machine**: Production VPS as user `acw` (with `sudo`).
 - **Affected DB**: None.
 - **Nature**: `Read-Only`.
 - **Command**:
   ```bash
-  ss -tlpn | grep 8000
-  ps aux | grep -E "gunicorn|runserver|manage.py" | grep -v grep || true
+  sudo ss -tlpn 'sport = :8000'
+  ps aux | grep -E "gunicorn|uvicorn|manage.py" | grep -v grep || true
   systemctl list-units --type=service | grep -i propanel || true
   ```
-- **Expected Output**: Identifies whether Gunicorn is running standalone, under supervisor, or under a systemd unit. Record PID for shutdown.
+- **Expected Output**: Reliably discovers PID and user binding port 8000. Record PID for shutdown.
 - **Failure Handling**: If port 8000 is not running, investigate Nginx error log (`/var/log/nginx/error.log`).
 
 ---
@@ -104,15 +107,15 @@
   ```bash
   test -f /home/acw/pro-panel/backend/.venv/bin/activate && echo "VENV: OK"
   /home/acw/pro-panel/backend/.venv/bin/python --version
-  /home/acw/pro-panel/backend/.venv/bin/python -c "import django, psycopg; print('Django:', django.__version__, '| Psycopg:', psycopg.__version__)"
+  /home/acw/pro-panel/backend/.venv/bin/python -c "import django, psycopg, channels, uvicorn; print('Django:', django.__version__, '| Channels:', channels.__version__, '| Uvicorn:', uvicorn.__version__)"
   ```
 - **Expected Output**:
   ```
   VENV: OK
   Python 3.10... or 3.11...
-  Django: 5.x | Psycopg: 3.x
+  Django: 5.x | Channels: 4.x | Uvicorn: 0.38...
   ```
-- **Failure Handling**: If `.venv` is missing, check alternative directory paths or reconstruct virtualenv before proceeding.
+- **Failure Handling**: If dependencies are missing, stop and resolve before continuing.
 
 ---
 
@@ -125,31 +128,42 @@
   ```bash
   ls -la /etc/nginx/sites-available/ /etc/nginx/sites-enabled/
   grep -rn "server_name.*propanel" /etc/nginx/sites-enabled/
+  grep -rn "proxy_pass" /etc/nginx/sites-enabled/
   sudo nginx -t
   ```
-- **Expected Output**: Shows verified site configuration files; `syntax is ok`.
+- **Expected Output**: Confirms upstream points to `127.0.0.1:8000`; `syntax is ok`.
 - **Failure Handling**: Do NOT proceed with symlinking unverified files if site names differ.
 
 ---
 
-### Command 0.6: Record Pre-Cutover Git Commit & Baseline State
-- **Purpose**: Record the exact pre-cutover Git commit hash to guarantee 100% recoverable application code during rollback.
+### Command 0.6: Ensure Old Baseline Commit & Dependencies Remain Available
+- **Purpose**: Record and snapshot the exact pre-cutover Git commit hash and virtual environment to guarantee 100% offline rollback recovery.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: None.
-- **Nature**: `Read-Only` / Git tag.
+- **Nature**: `State-Change` (Local backup creation).
 - **Command**:
   ```bash
   cd /home/acw/pro-panel
+  # 1. Record baseline Git commit
   PRE_CUTOVER_COMMIT=$(git rev-parse HEAD)
   echo "${PRE_CUTOVER_COMMIT}" > /home/acw/pro-panel/pre_cutover_commit.txt
-  git tag -f pre-cutover-baseline
+  git tag -f pre-cutover-baseline "${PRE_CUTOVER_COMMIT}"
   echo "Recorded pre-cutover commit: ${PRE_CUTOVER_COMMIT}"
 
-  # Fetch new architecture commits
+  # 2. Snapshot pre-cutover Python package inventory
+  /home/acw/pro-panel/backend/.venv/bin/pip freeze > /home/acw/pro-panel/backend/pre_cutover_requirements.txt
+
+  # 3. Snapshot pre-cutover virtualenv for offline instant recovery
+  if [ ! -d /home/acw/pro-panel/backend/.venv_pre_cutover ]; then
+      echo "Creating offline snapshot of .venv..."
+      cp -r /home/acw/pro-panel/backend/.venv /home/acw/pro-panel/backend/.venv_pre_cutover
+  fi
+
+  # 4. Fetch new architecture commits
   git fetch origin main
   git log -1 --format="Target Commit: %H | Date: %cd | Subject: %s" origin/main
   ```
-- **Expected Output**: Pre-cutover commit recorded; target commit `04ed567` (or latest) fetched cleanly.
+- **Expected Output**: Baseline commit tagged, `.venv_pre_cutover` snapshot stored, target commit `6ed4ef3` (or latest) fetched.
 
 ---
 
@@ -191,7 +205,7 @@
   if [ -f /etc/nginx/sites-available/propanel_maintenance.conf ]; then
       sudo ln -sf /etc/nginx/sites-available/propanel_maintenance.conf /etc/nginx/sites-enabled/propanel.conf
   else
-      echo "NOTICE: Using touch maintenance flag or proceeding with direct backend stop."
+      echo "NOTICE: Proceeding with direct backend stop."
   fi
   sudo nginx -t && sudo systemctl reload nginx
   ```
@@ -200,31 +214,52 @@
 
 ---
 
-### Command 1.2: Stop Backend Process Bound to Port 8000
-- **Purpose**: Stop backend application processes to prevent database modifications during cutover.
-- **Machine**: Production VPS as user `acw` / `root`.
+### Command 1.2: Stop Backend Process Bound to Port 8000 & Verify Port is Free
+- **Purpose**: Stop backend application processes and strictly verify port 8000 is free before continuing.
+- **Machine**: Production VPS as user `acw` (with `sudo`).
 - **Affected DB**: None.
 - **Nature**: `State-Change`.
 - **Command**:
   ```bash
-  # Check if a systemd unit exists
+  # 1. Stop systemd service if active
   if systemctl is-active --quiet propanel 2>/dev/null; then
       sudo systemctl stop propanel
   fi
 
-  # Gracefully terminate any remaining Gunicorn / Django process on port 8000
-  PIDS=$(ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+  # 2. Reliable PID discovery using sudo ss
+  PIDS=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
   if [ -n "$PIDS" ]; then
       echo "Stopping PID(s): $PIDS"
-      kill -TERM $PIDS
-      sleep 2
+      sudo kill -TERM $PIDS 2>/dev/null || true
+      
+      # Wait up to 10 seconds for graceful termination
+      for i in $(seq 1 10); do
+          if ! sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+              break
+          fi
+          sleep 1
+      done
+      
+      # Force kill if still bound
+      REMAINING=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+      if [ -n "$REMAINING" ]; then
+          echo "Sending SIGKILL to PID(s): $REMAINING"
+          sudo kill -9 $REMAINING 2>/dev/null || true
+          sleep 1
+      fi
   fi
 
-  # Verify port 8000 is free
-  ss -tlpn | grep 8000 || echo "Port 8000 is FREE."
+  # 3. Strictly verify port 8000 is free before continuing
+  if sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+      echo "FATAL ERROR: Port 8000 is STILL bound! Aborting." >&2
+      sudo ss -tlpn 'sport = :8000' >&2
+      exit 1
+  else
+      echo "VERIFIED: Port 8000 is completely FREE."
+  fi
   ```
-- **Expected Output**: `Port 8000 is FREE.`
-- **Failure Handling**: If port 8000 remains bound, run `kill -9 $PIDS`.
+- **Expected Output**: `VERIFIED: Port 8000 is completely FREE.`
+- **Failure Handling**: If port 8000 remains bound, abort cutover.
 
 ---
 
@@ -420,10 +455,10 @@
 
 ---
 
-## Phase 6: Media Asset Inventory & Verification
+## Phase 6: Media Asset Inventory & Non-Destructive Inspection
 
-### Command 6.1: Capture Pre-Cutover Media Archive & Check Existing Ownership
-- **Purpose**: Create an immutable backup of existing media and preserve existing filesystem ownership.
+### Command 6.1: Capture Pre-Cutover Media Archive & Inspect Existing Ownership
+- **Purpose**: Create an immutable backup of existing media and inspect directory permissions without recursive modification.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: None (Filesystem).
 - **Nature**: `Read-Only`.
@@ -432,10 +467,13 @@
   tar -czvf "/home/acw/backups/cutover_${CUTOVER_TIME}/media_pre_cutover_${CUTOVER_TIME}.tar.gz" -C /home/acw/pro-panel/backend media/
   sha256sum "/home/acw/backups/cutover_${CUTOVER_TIME}/media_pre_cutover_${CUTOVER_TIME}.tar.gz" >> /home/acw/backups/cutover_${CUTOVER_TIME}/SHA256SUMS
 
+  echo "=== Media Directory Inspection ==="
+  ls -ld /home/acw/pro-panel/backend/media
   MEDIA_OWNER=$(stat -c '%U:%G' /home/acw/pro-panel/backend/media)
-  echo "Existing media directory ownership: ${MEDIA_OWNER}"
+  MEDIA_PERMS=$(stat -c '%a' /home/acw/pro-panel/backend/media)
+  echo "Existing media directory ownership: ${MEDIA_OWNER} (Mode: ${MEDIA_PERMS})"
   ```
-- **Expected Output**: Archive created, checksum recorded, ownership verified (e.g. `acw:acw`).
+- **Expected Output**: Archive created, checksum recorded, ownership verified (e.g. `acw:acw`, mode `755`).
 - **Failure Handling**: If archive fails, verify disk space.
 
 ---
@@ -461,7 +499,7 @@
 
 ---
 
-## Phase 7: Application Configuration Update & Service Cutover
+## Phase 7: Application Configuration Update & ASGI Service Cutover
 
 ### Command 7.1: Controlled Atomic Update of `/home/acw/pro-panel/backend/.env`
 - **Purpose**: Atomically update database connection to `propanel_db_v2` while preserving all other variables and masking credentials.
@@ -541,13 +579,13 @@
   source /home/acw/pro-panel/backend/.venv/bin/activate
   python manage.py collectstatic --noinput
   ```
-- **Expected Output**: Static files collected; `0 static files copied...` or updated files copied.
+- **Expected Output**: Static files collected.
 - **Failure Handling**: Inspect static permissions if failed.
 
 ---
 
-### Command 7.3: Start / Restart Backend Application Process on Port 8000
-- **Purpose**: Bring backend application online pointing to `propanel_db_v2`.
+### Command 7.3: Start ASGI Application Process on `127.0.0.1:8000`
+- **Purpose**: Bring backend application online pointing to `propanel_db_v2` using Django ASGI (`config.asgi:application`), UvicornWorker, and reconciled `127.0.0.1:8000` bind.
 - **Machine**: Production VPS as user `acw` / `root`.
 - **Affected DB**: None.
 - **Nature**: `State-Change`.
@@ -559,25 +597,23 @@
       sudo systemctl restart propanel
       sudo systemctl status propanel --no-pager
   else
-      # Option B: Safe background launch with Gunicorn in verified virtualenv
+      # Option B: Direct verified Gunicorn ASGI launch with UvicornWorker
       cd /home/acw/pro-panel/backend
       source /home/acw/pro-panel/backend/.venv/bin/activate
-      nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+      nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn \
+          -c config/gunicorn.conf.py \
           --bind 127.0.0.1:8000 \
-          --workers 3 \
-          --timeout 120 \
-          --access-logfile /home/acw/pro-panel/backend/gunicorn_access.log \
-          --error-logfile /home/acw/pro-panel/backend/gunicorn_error.log \
+          config.asgi:application \
           --daemon
   fi
 
-  # Verify port 8000 is listening
+  # Verify process is actively listening on port 8000
   sleep 2
-  ss -tlpn | grep 8000
+  sudo ss -tlpn 'sport = :8000'
   ```
 - **Expected Output**:
   ```
-  LISTEN ... 127.0.0.1:8000 ...
+  LISTEN ... 127.0.0.1:8000 ... users:(("gunicorn",pid=...,fd=...))
   ```
 - **Failure Handling**: Inspect `/home/acw/pro-panel/backend/gunicorn_error.log`.
 
@@ -591,7 +627,7 @@
 
 ## Phase 8: Smoke Testing & Traffic Restoration
 
-### Command 8.1: API Health Verification
+### Command 8.1: API Health & WebSocket Verification
 - **Purpose**: Verify backend responds with HTTP 200 and can query `propanel_db_v2`.
 - **Machine**: Production VPS as user `acw`.
 - **Affected DB**: Target DB (`propanel_db_v2` on port 5433).
@@ -635,16 +671,27 @@
 
 If ANY checkpoint fails or an unrecoverable error occurs, execute this exact, non-destructive fast-path rollback:
 
-### Rollback Command R.1: Stop Backend Process on Port 8000
+### Rollback Command R.1: Stop Backend Process on Port 8000 & Verify Port is Free
 ```bash
 if systemctl is-active --quiet propanel 2>/dev/null; then
     sudo systemctl stop propanel
 fi
-PIDS=$(ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
-[ -n "$PIDS" ] && kill -TERM $PIDS
+PIDS=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+if [ -n "$PIDS" ]; then
+    sudo kill -TERM $PIDS 2>/dev/null || true
+    sleep 2
+    REMAINING=$(sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | awk '{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)
+    [ -n "$REMAINING" ] && sudo kill -9 $REMAINING 2>/dev/null || true
+fi
+
+# Verify port 8000 is free before continuing
+if sudo ss -tlpn 'sport = :8000' -H 2>/dev/null | grep -q '8000'; then
+    echo "ERROR: Port 8000 is still bound!" >&2
+    exit 1
+fi
 ```
 
-### Rollback Command R.2: Revert Codebase to Pre-Cutover Baseline
+### Rollback Command R.2: Revert Codebase & Dependencies to Pre-Cutover Baseline
 ```bash
 cd /home/acw/pro-panel
 if [ -f /home/acw/pro-panel/pre_cutover_commit.txt ]; then
@@ -653,6 +700,10 @@ else
     PRE_CUTOVER_COMMIT="pre-cutover-baseline"
 fi
 git checkout "${PRE_CUTOVER_COMMIT}"
+
+if [ -d /home/acw/pro-panel/backend/.venv_pre_cutover ]; then
+    rsync -a --delete /home/acw/pro-panel/backend/.venv_pre_cutover/ /home/acw/pro-panel/backend/.venv/
+fi
 ```
 
 ### Rollback Command R.3: Revert `.env` to Original `propanel_db` (Port 5433)
@@ -702,7 +753,7 @@ SELECT count(*) AS applied_migrations FROM django_migrations;
 # Expected: 31 tables, 140 migrations
 ```
 
-### Rollback Command R.5: Restart Backend Process Pointing to `propanel_db`
+### Rollback Command R.5: Restart ASGI Backend Process Pointing to `propanel_db`
 ```bash
 # Note: DO NOT run redis-cli FLUSHDB
 cd /home/acw/pro-panel/backend
@@ -712,14 +763,14 @@ python manage.py check
 if [ -f /etc/systemd/system/propanel.service ]; then
     sudo systemctl restart propanel
 else
-    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn config.wsgi:application \
+    nohup /home/acw/pro-panel/backend/.venv/bin/gunicorn \
+        -c config/gunicorn.conf.py \
         --bind 127.0.0.1:8000 \
-        --workers 3 \
-        --timeout 120 \
+        config.asgi:application \
         --daemon
 fi
 sleep 2
-ss -tlpn | grep 8000
+sudo ss -tlpn 'sport = :8000'
 ```
 
 ### Rollback Command R.6: Restore Production Nginx Traffic
